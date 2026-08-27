@@ -1,4 +1,6 @@
 import type { Asset, Account} from "./accounts.ts";
+import {prisma} from "./db.ts";
+import {lockBalance} from "./balance.ts";
 import {BalanceLock} from "./accounts.ts";
 export type OrderSide = "BUY" | "SELL" ;
 export type OrderStatus =  "OPEN" | "PARTIALLY_FILLED" | "FILLED";
@@ -13,6 +15,68 @@ export type Order = {
     price?:number;
     remainingqty:number;
     status : OrderStatus;
+}
+export async function saveOrder(order:Order){
+    return prisma.order.create({
+        data:{
+            id:order.id,
+            userId:order.userId,
+            side:order.side,
+            type:order.type,
+            asset:order.asset,
+            quantity:order.qty,
+            remainingQty:order.remainingqty,
+            price:order.price ?? null,
+            status:order.status,
+        }
+    })
+    
+}
+export async function createOrderInDb(id:string,userId:string,side:OrderSide,type:OrderType,qty:number,price?:number) {
+    const order:Order={
+        id,
+        userId,
+        side,
+        type,
+        asset: "BTC",
+        qty,
+        remainingqty: qty,
+        price,
+        status: "OPEN",
+    };
+    ValidateOrder(order);
+    if (type === "MARKET") {
+        throw new Error(
+            "Market orders will be handled by the matching engine"
+        );
+    }
+    if (price === undefined) {
+        throw new Error("Price Undefined");
+    }
+    const requiredAmount =
+        side === "BUY"
+            ? qty * price
+            : qty;
+
+    const assetToLock =
+        side === "BUY"
+            ? "USDT"
+            : "BTC";
+    await lockBalance(userId,assetToLock,requiredAmount);
+    return prisma.order.create({
+        data:{
+            id,
+            userId,
+            side,
+            type,
+            asset: "BTC",
+            quantity: qty,
+            remainingQty: qty,
+            price,
+            status: "OPEN",
+        },
+    });
+    
 }
 export function CreateOrder(id:string,userId:string,side:OrderSide,type:OrderType,qty:number,price?:number):Order{
     return {
@@ -37,8 +101,8 @@ export function LockOrderBalance(account:Account,order:Order):void{
         if(order.price===undefined){
         throw new Error("Price Undefined")
         }
-        if(order.price===undefined || order.side==="BUY"){
-            const amount = order.qty*order.price;
+        if(order.side==="BUY"){
+            const amount = order.qty * order.price;
             BalanceLock("USDT",account,amount);
         }
         if(order.side==="SELL"){
