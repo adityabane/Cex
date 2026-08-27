@@ -1,6 +1,6 @@
-import type {Order} from "./order";
-import type {Account} from "./accounts";
-import {settleTrade} from "./accounts";
+import type {Order} from "./order.ts";
+import type {Account} from "./accounts.ts";
+import {settleTrade} from "./accounts.ts";
 export class Orderbook {
     private bids :Order[]=[];
     private asks :Order[]=[];

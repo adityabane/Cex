@@ -2,21 +2,21 @@
 
 ## Week 1 — Core Exchange Engine
 
-- [ ] Project initialization
-- [ ] Users and balances
-- [ ] Order creation
-- [ ] Balance checking
-- [ ] Balance locking
-- [ ] Order book
-- [ ] Matching
-- [ ] Partial fills
-- [ ] Trades and fills
-- [ ] Settlement
-- [ ] Tests
+- [O] Project initialization
+- [O] Users and balances
+- [O] Order creation
+- [O] Balance checking
+- [O] Balance locking
+- [O] Order book
+- [O] Matching
+- [O] Partial fills
+- [O] Trades and fills
+- [O] Settlement
+- [O] Tests
 
 ## Week 2 — Persistence and Distributed Architecture
 
-- [ ] PostgreSQL
+- [O] PostgreSQL
 - [ ] Prisma
 - [ ] Persistent data
 - [ ] Backend

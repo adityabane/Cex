@@ -1,5 +1,5 @@
-import type { Asset, Account} from "./accounts";
-import {BalanceLock} from "./accounts";
+import type { Asset, Account} from "./accounts.ts";
+import {BalanceLock} from "./accounts.ts";
 export type OrderSide = "BUY" | "SELL" ;
 export type OrderStatus =  "OPEN" | "PARTIALLY_FILLED" | "FILLED";
 export type OrderType = "LIMIT"  | "MARKET";

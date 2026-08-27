@@ -5,45 +5,51 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+
+  
 }
 
 model User {
-  id        String @id @default(uuid())
+  id        String    @id @default(uuid())
+  createdAt DateTime  @default(now())
   balances  Balance[]
   orders    Order[]
-  createdAt DateTime @default(now())
 }
-model Balance{
-  id        String @id @default(uuid())
+
+model Balance {
+  id        String  @id @default(uuid())
   userId    String
   asset     String
-  available Decimal @db.Decimal(30,10)
-  locked    Decimal @db.Decimal(30,10)
-  user User @relation(fields: [userId],references: [id])
-  @@unique([userId,asset])
+  available Decimal @db.Decimal(30, 10)
+  locked    Decimal @db.Decimal(30, 10)
+  user      User    @relation(fields: [userId], references: [id])
+
+  @@unique([userId, asset])
 }
+
 model Order {
-  id        String @id
-  userId    String
-  side      String
-  type      String
-  asset     String
-  quantity  Decimal @db.Decimal(30,10)
-  remainingQty Decimal @db.Decimal(30,10)
-  price      Decimal? @db.Decimal(30,10)
-  status    String
-  createdAt   DateTime @default(now())
-  user User @relation(fields: [userId],references: [id])
-  buyTrades Trade[] @relation("BuyOrder")
-  sellTrades Trade[] @relation("SellOrder")
+  id           String   @id
+  userId       String
+  side         String
+  type         String
+  asset        String
+  quantity     Decimal  @db.Decimal(30, 10)
+  remainingQty Decimal  @db.Decimal(30, 10)
+  price        Decimal? @db.Decimal(30, 10)
+  status       String
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id])
+  buyTrades    Trade[]  @relation("BuyOrder")
+  sellTrades   Trade[]  @relation("SellOrder")
 }
-model Trade{
-  id    String @id @default(uuid())
-  buyOrderId    String
+
+model Trade {
+  id          String   @id @default(uuid())
+  buyOrderId  String
   sellOrderId String
-  price Decimal @db.Decimal(30,10)
-  quantity Decimal @db.Decimal(30,10)
-  createdAt DateTime @default(now())
-  buyOrder Order @relation("BuyOrder",fields: [buyOrderId],references: [id])
-  sellOrder Order @relation("SellOrder",fields: [sellOrderId],references: [id])
+  price       Decimal  @db.Decimal(30, 10)
+  quantity    Decimal  @db.Decimal(30, 10)
+  createdAt   DateTime @default(now())
+  buyOrder    Order    @relation("BuyOrder", fields: [buyOrderId], references: [id])
+  sellOrder   Order    @relation("SellOrder", fields: [sellOrderId], references: [id])
 }
