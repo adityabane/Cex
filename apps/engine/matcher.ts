@@ -89,7 +89,7 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
             },
             data:{
                 locked:{
-                    decrement:tradeValue,
+                    decrement:reservedValue,
                 },
                 available: {
                     increment: refund,
