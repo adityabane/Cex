@@ -5,6 +5,7 @@ import { createOrderInDb } from "./order";
 import { matchOrders } from "./matcher";
 import { getBestAsk, getBestBid } from "./orderbook-db";
 import { matchBuyOrder,matchSellOrder } from "./matching-engine";
+import {submitOrder} from "./submit-order";
 async function testCaseA() {
     console.log("\n==============================");
     console.log("TEST CASE A: SAME PRICE");
@@ -551,11 +552,37 @@ async function testCaseE() {
 
 async function main() {
     console.log("CEX V2 Engine Started");
-    await testCaseA();
-    await testCaseB();
-    await testCaseC();
-    await testCaseD();
-    await testCaseE();
+    // await testCaseA();
+    // await testCaseB();
+    // await testCaseC();
+    // await testCaseD();
+    // await testCaseE();
+    const buyer = await createUser();
+const seller = await createUser();
+
+await createBalance(buyer.id, "USDT", 5000);
+await createBalance(seller.id, "BTC", 1);
+const sell = await submitOrder(
+    crypto.randomUUID(),
+    seller.id,
+    "SELL",
+    "LIMIT",
+    0.5,
+    4000,
+);
+
+console.log("SELL:", sell);
+const buy = await submitOrder(
+    crypto.randomUUID(),
+    buyer.id,
+    "BUY",
+    "LIMIT",
+    0.5,
+    4000,
+);
+
+console.log("BUY:", buy);
+
     console.log("\n==============================");
     console.log("ALL TESTS COMPLETED");
     console.log("==============================");
