@@ -1,0 +1,110 @@
+import express from "express";
+import {createUser} from "../engine/user"
+import {submitOrder} from "../engine/submit-order";
+import {createBalance} from "../engine/balance";
+import {getBalance} from "../engine/balance";
+import {getUserOrders} from "../engine/order";
+const app = express();
+app.use(express.json());
+app.get("/",(_req,res)=>{
+    res.json({
+        message:"CEX v2 Backend Running"
+    });
+});
+app.post("/users",async (_req,res)=>{
+    try{
+        const user = await createUser();
+        res.status(201).json(user);
+    }catch(error){
+        console.error("Create user error:",error);
+        res.status(500).json({
+            error:"Failed to create user"
+        })
+    }
+})
+app.post("/orders",async (req,res )=>{
+    try{
+        const {
+            userId,
+            side,
+            type,
+            qty,
+            price,
+        } = req.body;
+        if (!userId || !side || !type || !qty) {
+            return res.status(400).json({
+                error: "userId, side, type and qty are required",
+            });
+        }
+        const order = await submitOrder(
+            crypto.randomUUID(),
+            userId,
+            side,
+            type,
+            qty,
+            price
+        );
+        res.status(201).json(order);
+    } catch (error) {
+        console.error("Create order error:", error);
+
+        res.status(400).json({
+            error: "Failed to create order",
+        });
+    }  
+});
+app.post("/users/:userId/balances", async (req ,res )=>{
+    try {
+        const {userId} = req.params;
+        const {asset,amount} = req.body;
+        if (!asset || amount === undefined) {
+            return res.status(400).json({
+                error: "asset and amount are required",
+            });
+        }
+        const balance = await createBalance(
+            userId,
+            asset,
+            amount
+        );
+        res.status(201).json(balance);
+    } catch (error) {
+        console.error("Create balance error:", error);
+        res.status(400).json({
+            error: "Failed to create balance",
+        });
+    }
+})
+app.get("/users/:userId/balances/:asset", async (req, res) => {
+    try {
+        const { userId, asset } = req.params;
+        const balance = await getBalance(userId, asset);
+        if (!balance) {
+            return res.status(404).json({
+                error: `Balance not found for ${asset}`,
+            });
+        }
+        res.json(balance);
+    } catch (error) {
+        console.error("Get balance error:", error);
+
+        res.status(500).json({
+            error: "Failed to get balance",
+        });
+    }
+});
+app.get("/users/:userId/orders", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const orders = await getUserOrders(userId);
+        res.json(orders);
+    } catch (error) {
+        console.error("Get orders error:", error);
+        res.status(500).json({
+            error: "Failed to get orders",
+        });
+    }
+});
+app.listen(3000,()=>{
+    console.log("CEX v2 Backend Running on http://localhost:3000")
+});

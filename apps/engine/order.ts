@@ -117,3 +117,13 @@ export function lockMarketBuyBalance(account:Account,order:Order,requireUSDT:num
     }
     BalanceLock("USDT",account,requireUSDT);
 }
+export async function getUserOrders(userId:string){
+    return prisma.order.findMany({
+        where:{
+            userId,
+        },
+        orderBy:{
+            createdAt:"desc"
+        }
+    })
+}
