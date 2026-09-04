@@ -1,3 +1,4 @@
+import "./websocket";
 import express from "express";
 import {createUser} from "../engine/user"
 import {publishOrder} from "../engine/redis-order-queue";
