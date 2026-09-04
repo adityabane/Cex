@@ -1,9 +1,10 @@
 import express from "express";
 import {createUser} from "../engine/user"
-import {submitOrder} from "../engine/submit-order";
+import {publishOrder} from "../engine/redis-order-queue";
 import {createBalance} from "../engine/balance";
 import {getBalance} from "../engine/balance";
 import {getUserOrders} from "../engine/order";
+import { redis } from "../engine/redis";
 const app = express();
 app.use(express.json());
 app.get("/",(_req,res)=>{
@@ -36,20 +37,37 @@ app.post("/orders",async (req,res )=>{
                 error: "userId, side, type and qty are required",
             });
         }
-        const order = await submitOrder(
-            crypto.randomUUID(),
+        const orderId = crypto.randomUUID();
+        console.log("Order received by backend:");
+        console.log({
+            orderId,
+            userId,
+            side,
+            type,
+            qty,
+            price,
+        });
+        const messageId = await publishOrder({
+            orderId,
             userId,
             side,
             type,
             qty,
             price
-        );
-        res.status(201).json(order);
-    } catch (error) {
-        console.error("Create order error:", error);
+        });
+        console.log("Order published to Redis:");
+        console.log("Redis Message ID:", messageId);
 
-        res.status(400).json({
-            error: "Failed to create order",
+        res.status(201).json({
+            message:"Order queued",
+            orderId,
+            redisMessageId:messageId,
+        });
+    } catch (error) {
+        console.error("Queue order error:", error);
+
+        res.status(500).json({
+            error: "Failed to queue order",
         });
     }  
 });
