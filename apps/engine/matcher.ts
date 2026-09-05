@@ -24,10 +24,12 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
             throw new Error("Assets do not match");
         }
         if (
-            buyOrder.status !== "OPEN" ||
-            sellOrder.status !== "OPEN"
+            (buyOrder.status !== "OPEN" &&
+                buyOrder.status !== "PARTIALLY_FILLED") ||
+            (sellOrder.status !== "OPEN" &&
+                sellOrder.status !== "PARTIALLY_FILLED")
         ) {
-            throw new Error("Orders must be OPEN");
+            throw new Error("Orders must be OPEN or PARTIALLY_FILLED");
         }
         if (
             buyOrder.price === null ||
