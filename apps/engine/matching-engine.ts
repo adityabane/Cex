@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import {publishTradeEvent} from "./redis-market-data";
 import { matchOrders } from "./matcher";
 import { getBestAsk,getBestBid } from "./orderbook-db";
 export async function matchBuyOrder(buyOrderId: string) {
@@ -50,10 +51,16 @@ export async function matchBuyOrder(buyOrderId: string) {
         console.log(
             `Matching BUY ${currentBuy.id} with SELL ${bestAsk.id}`
         );
-        await matchOrders(
+        const trade = await matchOrders(
             currentBuy.id,
             bestAsk.id
         );
+        await publishTradeEvent({
+            type:"TRADE",
+            asset:currentBuy.asset,
+            price:Number(trade.price),
+            quantity:Number(trade.quantity),
+        });
     }
     return prisma.order.findUnique({
         where: {
@@ -117,10 +124,16 @@ export async function matchSellOrder(sellOrderId: string,createdAfter?:Date) {
             `Matching SELL ${currentSell.id} with BUY ${bestBid.id}`
         );
 
-        await matchOrders(
+        const trade = await matchOrders(
             bestBid.id,
             currentSell.id
         );
+        await publishTradeEvent({
+            type: "TRADE",
+            asset: currentSell.asset,
+            price: Number(trade.price),
+            quantity: Number(trade.quantity),
+        });
     }
 
     return prisma.order.findUnique({

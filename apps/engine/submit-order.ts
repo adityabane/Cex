@@ -3,6 +3,8 @@ import {
     matchBuyOrder,
     matchSellOrder,
 } from "./matching-engine.ts";
+import { getOrderBookSnapshot } from "../backend/orderbook-snapshot";
+import { publishDepthEvent } from "./redis-depth";
 
 export async function submitOrder(
     id: string,
@@ -21,9 +23,22 @@ export async function submitOrder(
         price,
     );
 
+    let result;
+
     if (side === "BUY") {
-        return matchBuyOrder(order.id);
+        result = await matchBuyOrder(order.id);
+    } else {
+        result = await matchSellOrder(order.id);
     }
 
-    return matchSellOrder(order.id);
+    const snapshot = await getOrderBookSnapshot(order.asset);
+
+    await publishDepthEvent({
+        type: "DEPTH",
+        asset: order.asset,
+        bids: snapshot.bids,
+        asks: snapshot.asks,
+    });
+
+    return result;
 }
