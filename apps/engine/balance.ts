@@ -61,3 +61,43 @@ export async function lockBalance(userId:string,asset:string,amount:number){
             });
     });
 }
+export async function unlockBalance(userId:string,asset:string,amount:number){
+    if(amount<=0){
+        throw new Error("Invalid unlock amount");
+    }
+    return prisma.$transaction(async(tx)=>{
+        const balance = await tx.balance.findUnique({
+            where:{
+                userId_asset:{
+                    userId,
+                    asset,
+                },
+            },
+        })
+        if(!balance){
+            throw new Error(`Balance not found for ${asset}`);
+        }
+        if (balance.locked.lt(amount)) {
+            throw new Error(
+                `Insufficient locked ${asset} balance`
+            );
+        }
+        return tx.balance.update({
+            where: {
+                userId_asset: {
+                    userId,
+                    asset,
+                },
+            },
+            data: {
+                locked: {
+                    decrement: amount,
+                },
+                available: {
+                    increment: amount,
+                },
+            },
+        });
+
+    })
+}

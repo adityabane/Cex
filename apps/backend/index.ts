@@ -72,6 +72,40 @@ app.post("/orders",async (req,res )=>{
         });
     }  
 });
+app.delete("/orders/:orderId", async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { userId } = req.body;
+
+        if (!userId) {
+            return res.status(400).json({
+                error: "userId is required",
+            });
+        }
+
+        const redisMessageId = await redis.xadd(
+            "cex:orders",
+            "*",
+            {
+                action:"CANCEL",
+                orderId,
+                userId,
+            }
+        );
+
+        return res.json({
+            message: "Cancellation queued",
+            orderId,
+            redisMessageId,
+        });
+    } catch (error) {
+        console.error("Cancel order error:", error);
+
+        return res.status(500).json({
+            error: "Failed to queue cancellation",
+        });
+    }
+});
 app.post("/users/:userId/balances", async (req ,res )=>{
     try {
         const {userId} = req.params;

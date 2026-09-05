@@ -1,7 +1,7 @@
 import {redis} from "./redis";
 import {submitOrder} from "./submit-order";
+import { cancelOrder } from "./cancel-order";
 import type {OrderSide,OrderType} from "./order";
-import { resolve } from "dns";
 const ORDER_STREAM = "cex:orders";
 type RedisMessage = [
     string,string[]
@@ -36,6 +36,26 @@ async function consumeOrders(){
                         const order = parseFields(fields);
                         console.log("Order received from Redis:");
                         console.log(order);
+                        if (order.action === "CANCEL") {
+                            if (!order.orderId) {
+                                throw new Error("Missing orderId in cancellation event");
+                            }
+
+                            if (!order.userId) {
+                                throw new Error("Missing userId in cancellation event");
+                            }
+
+                            await cancelOrder(
+                                order.orderId,
+                                order.userId,
+                            );
+
+                            console.log(
+                                `Order ${order.orderId} cancelled`
+                            );
+
+                            continue;
+                        }
                         if (!order.orderId) {
                             throw new Error("Missing orderId in Redis event");
                         }
