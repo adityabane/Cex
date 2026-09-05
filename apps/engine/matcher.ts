@@ -59,7 +59,7 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
                 status:
                     buyOrder.remainingQty.equals(quantity)
                         ? "FILLED"
-                        : "OPEN",
+                        : "PARTIALLY_FILLED",
             },
         });
 
@@ -74,7 +74,7 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
                 status:
                     sellOrder.remainingQty.equals(quantity)
                         ? "FILLED"
-                        : "OPEN",
+                        : "PARTIALLY_FILLED",
             },
         });
         const tradeValue = quantity.mul(tradePrice);

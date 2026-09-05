@@ -5,6 +5,7 @@ import {
 } from "./matching-engine.ts";
 import { getOrderBookSnapshot } from "../backend/orderbook-snapshot";
 import { publishDepthEvent } from "./redis-depth";
+import { publishOrderStatusEvent } from "./redis-order-status";
 
 export async function submitOrder(
     id: string,
@@ -22,7 +23,13 @@ export async function submitOrder(
         qty,
         price,
     );
-
+    await publishOrderStatusEvent({
+    type: "ORDER_STATUS",
+    userId: order.userId,
+    orderId: order.id,
+    status: order.status,
+    remainingQty: Number(order.remainingQty),
+});
     let result;
 
     if (side === "BUY") {

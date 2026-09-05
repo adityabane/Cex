@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import {publishTradeEvent} from "./redis-market-data";
 import { matchOrders } from "./matcher";
 import { getBestAsk,getBestBid } from "./orderbook-db";
+import { publishOrderStatusEvent } from "./redis-order-status";
 export async function matchBuyOrder(buyOrderId: string) {
     const buyOrder = await prisma.order.findUnique({
         where: {
@@ -55,6 +56,33 @@ export async function matchBuyOrder(buyOrderId: string) {
             currentBuy.id,
             bestAsk.id
         );
+        const updatedBuyOrder = await prisma.order.findUnique({
+            where: { id: currentBuy.id },
+        });
+
+        const updatedSellOrder = await prisma.order.findUnique({
+            where: { id: bestAsk.id },
+        });
+
+        if (updatedBuyOrder) {
+            await publishOrderStatusEvent({
+                type: "ORDER_STATUS",
+                userId: updatedBuyOrder.userId,
+                orderId: updatedBuyOrder.id,
+                status: updatedBuyOrder.status,
+                remainingQty: Number(updatedBuyOrder.remainingQty),
+            });
+        }
+
+        if (updatedSellOrder) {
+            await publishOrderStatusEvent({
+                type: "ORDER_STATUS",
+                userId: updatedSellOrder.userId,
+                orderId: updatedSellOrder.id,
+                status: updatedSellOrder.status,
+                remainingQty: Number(updatedSellOrder.remainingQty),
+            });
+        }
         await publishTradeEvent({
             type:"TRADE",
             asset:currentBuy.asset,
@@ -128,6 +156,34 @@ export async function matchSellOrder(sellOrderId: string,createdAfter?:Date) {
             bestBid.id,
             currentSell.id
         );
+
+        const updatedBuyOrder = await prisma.order.findUnique({
+            where: { id: bestBid.id },
+        });
+
+        const updatedSellOrder = await prisma.order.findUnique({
+            where: { id: currentSell.id },
+        });
+
+        if (updatedBuyOrder) {
+            await publishOrderStatusEvent({
+                type: "ORDER_STATUS",
+                userId: updatedBuyOrder.userId,
+                orderId: updatedBuyOrder.id,
+                status: updatedBuyOrder.status,
+                remainingQty: Number(updatedBuyOrder.remainingQty),
+            });
+        }
+
+        if (updatedSellOrder) {
+            await publishOrderStatusEvent({
+                type: "ORDER_STATUS",
+                userId: updatedSellOrder.userId,
+                orderId: updatedSellOrder.id,
+                status: updatedSellOrder.status,
+                remainingQty: Number(updatedSellOrder.remainingQty),
+            });
+        }
         await publishTradeEvent({
             type: "TRADE",
             asset: currentSell.asset,

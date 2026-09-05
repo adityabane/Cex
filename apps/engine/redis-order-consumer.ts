@@ -4,6 +4,7 @@ import { cancelOrder } from "./cancel-order";
 import type {OrderSide,OrderType} from "./order";
 import { getOrderBookSnapshot } from "../backend/orderbook-snapshot";
 import { publishDepthEvent } from "./redis-depth";
+import { publishOrderStatusEvent } from "./redis-order-status";
 const ORDER_STREAM = "cex:orders";
 type RedisMessage = [
     string,string[]
@@ -51,6 +52,13 @@ async function consumeOrders(){
                                 order.orderId,
                                 order.userId,
                             );
+                            await publishOrderStatusEvent({
+                                type: "ORDER_STATUS",
+                                userId: cancelledOrder.userId,
+                                orderId: cancelledOrder.id,
+                                status: cancelledOrder.status,
+                                remainingQty: Number(cancelledOrder.remainingQty),
+                            });
 
                             const snapshot = await getOrderBookSnapshot(
                                 cancelledOrder.asset,

@@ -92,6 +92,14 @@ async function consumeMarketData() {
                                 JSON.stringify(event)
                             );
                         }
+                        if (
+                            event.type === "ORDER_STATUS" &&
+                            subscriptions.has(`orders.${event.userId}`)
+                        ) {
+                            client.send(
+                                JSON.stringify(event)
+                            );
+                        }
                     }
                     await redis.xack(
                         MARKET_DATA_STREAM,
