@@ -2,6 +2,8 @@ import {redis} from "./redis";
 import {submitOrder} from "./submit-order";
 import { cancelOrder } from "./cancel-order";
 import type {OrderSide,OrderType} from "./order";
+import { getOrderBookSnapshot } from "../backend/orderbook-snapshot";
+import { publishDepthEvent } from "./redis-depth";
 const ORDER_STREAM = "cex:orders";
 type RedisMessage = [
     string,string[]
@@ -45,10 +47,21 @@ async function consumeOrders(){
                                 throw new Error("Missing userId in cancellation event");
                             }
 
-                            await cancelOrder(
+                            const cancelledOrder = await cancelOrder(
                                 order.orderId,
                                 order.userId,
                             );
+
+                            const snapshot = await getOrderBookSnapshot(
+                                cancelledOrder.asset,
+                            );
+
+                            await publishDepthEvent({
+                                type: "DEPTH",
+                                asset: cancelledOrder.asset,
+                                bids: snapshot.bids,
+                                asks: snapshot.asks,
+                            });
 
                             console.log(
                                 `Order ${order.orderId} cancelled`
