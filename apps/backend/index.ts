@@ -6,6 +6,10 @@ import {createBalance} from "../engine/balance";
 import {getBalance} from "../engine/balance";
 import {getUserOrders,getOrderById} from "../engine/order";
 import { redis } from "../engine/redis";
+import { createToken } from "./auth";
+import {prisma} from "../engine/db";
+import { authMiddleware } from "./auth-middleware";
+import type {AuthRequest } from "./auth-middleware";
 const app = express();
 app.use(express.json());
 app.get("/",(_req,res)=>{
@@ -13,10 +17,57 @@ app.get("/",(_req,res)=>{
         message:"CEX v2 Backend Running"
     });
 });
-app.post("/users",async (_req,res)=>{
+app.post("/auth/login", async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        if (!email || !password) {
+            return res.status(400).json({
+                error: "email and password are required",
+            });
+        }
+        const user = await prisma.user.findUnique({
+            where: {
+                email,
+            },
+        });
+        if (!user) {
+            return res.status(401).json({
+                error: "Invalid email or password",
+            });
+        }
+        const validPassword = await Bun.password.verify(
+            password,
+            user.passwordHash,
+        );
+        if (!validPassword) {
+            return res.status(401).json({
+                error: "Invalid email or password",
+            });
+        }
+        const token = await createToken(user.id);
+        res.json({
+            token,
+        });
+    } catch (error) {
+        console.error("Login error:", error);
+        res.status(500).json({
+            error: "Login failed",
+        });
+    }
+});
+app.post("/users",async (req,res)=>{
     try{
-        const user = await createUser();
-        res.status(201).json(user);
+        const {email,password} = req.body;
+        if (!email || !password) {
+            return res.status(400).json({
+                error: "email and password are required",
+            });
+        }
+        const user = await createUser(email,password);
+        res.status(201).json({
+            id:user.id,
+            email:user.email,
+        });
     }catch(error){
         console.error("Create user error:",error);
         res.status(500).json({
@@ -24,15 +75,15 @@ app.post("/users",async (_req,res)=>{
         })
     }
 })
-app.post("/orders",async (req,res )=>{
+app.post("/orders",authMiddleware, async (req:AuthRequest,res )=>{
     try{
         const {
-            userId,
             side,
             type,
             qty,
             price,
         } = req.body;
+        const userId = req.userId;
         if (!userId || !side || !type || !qty) {
             return res.status(400).json({
                 error: "userId, side, type and qty are required",
@@ -72,10 +123,10 @@ app.post("/orders",async (req,res )=>{
         });
     }  
 });
-app.delete("/orders/:orderId", async (req, res) => {
+app.delete("/orders/:orderId",authMiddleware, async (req:AuthRequest, res) => {
     try {
         const { orderId } = req.params;
-        const { userId } = req.body;
+        const  userId  = req.userId;
 
         if (!userId) {
             return res.status(400).json({
@@ -106,13 +157,23 @@ app.delete("/orders/:orderId", async (req, res) => {
         });
     }
 });
-app.post("/users/:userId/balances", async (req ,res )=>{
+app.post("/users/:userId/balances",authMiddleware, async (req:AuthRequest ,res )=>{
     try {
         const {userId} = req.params;
+        if (userId !== req.userId) {
+            return res.status(403).json({
+            error: "You cannot modify another user's balance",
+        });
+}
         const {asset,amount} = req.body;
         if (!asset || amount === undefined) {
             return res.status(400).json({
                 error: "asset and amount are required",
+            });
+        }
+        if (typeof userId !== "string") {
+            return res.status(400).json({
+                error: "Invalid user ID",
             });
         }
         const balance = await createBalance(
@@ -128,9 +189,19 @@ app.post("/users/:userId/balances", async (req ,res )=>{
         });
     }
 })
-app.get("/users/:userId/balances/:asset", async (req, res) => {
+app.get("/users/:userId/balances/:asset",authMiddleware, async (req:AuthRequest, res) => {
     try {
         const { userId, asset } = req.params;
+        if (userId !== req.userId) {
+            return res.status(403).json({
+                error: "You cannot access another user's balance",
+            });
+        }
+        if (typeof userId !== "string" || typeof asset !== "string") {
+            return res.status(400).json({
+                error: "Invalid user ID",
+            });
+        }
         const balance = await getBalance(userId, asset);
         if (!balance) {
             return res.status(404).json({
@@ -146,9 +217,19 @@ app.get("/users/:userId/balances/:asset", async (req, res) => {
         });
     }
 });
-app.get("/users/:userId/orders", async (req, res) => {
+app.get("/users/:userId/orders", authMiddleware,async (req:AuthRequest, res) => {
     try {
         const { userId } = req.params;
+        if (userId !== req.userId) {
+            return res.status(403).json({
+                error: "You cannot access another user's orders",
+            });
+        }
+        if (typeof userId !== "string") {
+            return res.status(400).json({
+                error: "Invalid user ID",
+            });
+        }
         const orders = await getUserOrders(userId);
         res.json(orders);
     } catch (error) {
@@ -158,13 +239,24 @@ app.get("/users/:userId/orders", async (req, res) => {
         });
     }
 });
-app.get("/orders/:orderId",async (req , res )=>{
+app.get("/orders/:orderId",authMiddleware,async (req:AuthRequest , res )=>{
     try{
         const {orderId} = req.params;
+        if (typeof orderId !== "string") {
+            return res.status(400).json({
+                error: "Invalid order ID",
+            });
+        }
         const order = await getOrderById(orderId);
+        
         if(!order){
             return res.status(404).json({
                 error:"Order not Found",
+            });
+        }
+        if (order.userId !== req.userId) {
+            return res.status(404).json({
+                error: "Order not found",
             });
         }
         res.json(order)
