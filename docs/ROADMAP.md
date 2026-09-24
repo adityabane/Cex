@@ -17,18 +17,18 @@
 ## Week 2 — Persistence and Distributed Architecture
 
 - [O] PostgreSQL
-- [ ] Prisma
-- [ ] Persistent data
-- [ ] Backend
-- [ ] Redis
-- [ ] Backend → Redis → Engine
+- [O] Prisma
+- [O] Persistent data
+- [O] Backend
+- [O] Redis
+- [O] Backend → Redis → Engine
 
 ## Week 3 — Realtime and Recovery
 
-- [ ] WebSockets
-- [ ] Market data
-- [ ] Subscriptions
-- [ ] Recovery
+- [O] WebSockets
+- [O] Market data
+- [O] Subscriptions
+- [O] Recovery
 - [ ] Snapshots
 - [ ] Event replay if required
 - [ ] End-to-end testing

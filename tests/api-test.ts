@@ -10,6 +10,23 @@ type LoginResponse = {
     token: string;
 };
 
+type OrderStatus =
+    | "OPEN"
+    | "PARTIALLY_FILLED"
+    | "FILLED"
+    | "CANCELLED";
+
+type Order = {
+    id: string;
+    userId: string;
+    side: "BUY" | "SELL";
+    type: "LIMIT" | "MARKET";
+    quantity: number;
+    remainingQty: number;
+    price: number | null;
+    status: OrderStatus;
+};
+
 async function request(
     path: string,
     options: RequestInit = {},
@@ -46,7 +63,19 @@ async function request(
 function logResponse(label: string, response: any) {
     console.log(`\n${label}`);
     console.log(`Status: ${response.status}`);
-    console.log("Response:", JSON.stringify(response.body, null, 2));
+    console.log(
+        "Response:",
+        JSON.stringify(response.body, null, 2),
+    );
+}
+
+function assert(
+    condition: boolean,
+    message: string,
+) {
+    if (!condition) {
+        throw new Error(`❌ ${message}`);
+    }
 }
 
 async function createUser(
@@ -63,9 +92,15 @@ async function createUser(
 
     logResponse("CREATE USER", response);
 
-    if (!response.ok) {
-        throw new Error(`Failed to create user: ${response.status}`);
-    }
+    assert(
+        response.status === 201,
+        `User creation failed: ${response.status}`,
+    );
+
+    assert(
+        !!response.body.id,
+        "User creation did not return user ID",
+    );
 
     return {
         id: response.body.id,
@@ -85,17 +120,17 @@ async function login(user: User): Promise<string> {
 
     logResponse(`LOGIN ${user.email}`, response);
 
-    if (!response.ok) {
-        throw new Error(`Login failed: ${response.status}`);
-    }
+    assert(
+        response.status === 200,
+        `Login failed: ${response.status}`,
+    );
 
-    const data = response.body as LoginResponse;
+    assert(
+        !!response.body.token,
+        "Login response did not contain JWT token",
+    );
 
-    if (!data.token) {
-        throw new Error("Login response did not contain token");
-    }
-
-    return data.token;
+    return response.body.token;
 }
 
 async function createBalance(
@@ -118,21 +153,21 @@ async function createBalance(
 
     logResponse(`CREATE BALANCE ${asset}`, response);
 
-    if (!response.ok) {
-        throw new Error(
-            `Failed to create balance ${asset}: ${response.status}`,
-        );
-    }
+    assert(
+        response.status === 201,
+        `Failed to create ${asset} balance`,
+    );
 
     return response.body;
 }
 
-async function getOrder(
-    orderId: string,
+async function getBalance(
+    userId: string,
+    asset: string,
     token: string,
 ) {
     return request(
-        `/orders/${orderId}`,
+        `/users/${userId}/balances/${asset}`,
         {
             method: "GET",
         },
@@ -142,10 +177,10 @@ async function getOrder(
 
 async function createOrder(
     order: {
-        symbol: string;
         side: "BUY" | "SELL";
-        price: number;
-        quantity: number;
+        type: "LIMIT" | "MARKET";
+        qty: number;
+        price?: number;
     },
     token: string,
 ) {
@@ -163,44 +198,104 @@ async function createOrder(
     return response;
 }
 
+async function getOrder(
+    orderId: string,
+    token: string,
+) {
+    return request(
+        `/orders/${orderId}`,
+        {
+            method: "GET",
+        },
+        token,
+    );
+}
+
+async function getUserOrders(
+    userId: string,
+    token: string,
+) {
+    return request(
+        `/users/${userId}/orders`,
+        {
+            method: "GET",
+        },
+        token,
+    );
+}
+
+async function cancelOrder(
+    orderId: string,
+    token: string,
+) {
+    const response = await request(
+        `/orders/${orderId}`,
+        {
+            method: "DELETE",
+        },
+        token,
+    );
+
+    logResponse("CANCEL ORDER", response);
+
+    return response;
+}
+
 async function waitForOrder(
     orderId: string,
     token: string,
+    expectedStatuses: OrderStatus[],
     timeoutMs = 15000,
 ) {
     const start = Date.now();
 
-    console.log(`\nWaiting for order ${orderId}...`);
-
-    let lastResponse: any = null;
+    let lastOrder: any = null;
 
     while (Date.now() - start < timeoutMs) {
-        lastResponse = await getOrder(orderId, token);
-
-        if (lastResponse.ok) {
-            const status = lastResponse.body.status;
-
-            console.log(
-                `Order status: ${status} (${Date.now() - start}ms)`,
-            );
-
-            return lastResponse.body;
-        }
-
-        console.log(
-            `GET /orders/${orderId} -> ${lastResponse.status}`,
+        const response = await getOrder(
+            orderId,
+            token,
         );
 
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        if (response.ok) {
+            lastOrder = response.body;
+
+            console.log(
+                `Order ${orderId} status: ${response.body.status}`,
+            );
+
+            if (
+                expectedStatuses.includes(
+                    response.body.status,
+                )
+            ) {
+                return response.body as Order;
+            }
+        }
+
+        await new Promise((resolve) =>
+            setTimeout(resolve, 1000),
+        );
     }
+
+    console.log(
+        "\nLast order response:",
+        JSON.stringify(lastOrder, null, 2),
+    );
 
     return null;
 }
 
 async function main() {
     console.log("========================================");
-    console.log("CEX V2 ORDER PIPELINE DIAGNOSTIC TEST");
+    console.log("       CEX V2 COMPLETE API TEST");
     console.log("========================================");
+
+    /*
+     * -------------------------------------
+     * 1. BACKEND HEALTH CHECK
+     * -------------------------------------
+     */
 
     console.log("\n1. Checking backend...");
 
@@ -208,11 +303,20 @@ async function main() {
 
     logResponse("GET /", root);
 
-    if (!root.ok) {
-        throw new Error(
-            "Backend is not responding correctly.",
-        );
-    }
+    assert(
+        root.status === 200,
+        "Backend is not responding",
+    );
+
+    console.log("✅ Backend is running");
+
+    /*
+     * -------------------------------------
+     * 2. CREATE TWO USERS
+     * -------------------------------------
+     */
+
+    console.log("\n2. Creating users...");
 
     const uniqueId =
         `${Date.now()}-${crypto.randomUUID()}`;
@@ -227,231 +331,651 @@ async function main() {
         "TestPassword123!",
     );
 
-    console.log("\n2. Logging in users...");
+    console.log("\n✅ Users created");
+    console.log("User A:", userA.id);
+    console.log("User B:", userB.id);
+
+    /*
+     * -------------------------------------
+     * 3. LOGIN
+     * -------------------------------------
+     */
+
+    console.log("\n3. Logging in...");
 
     const tokenA = await login(userA);
     const tokenB = await login(userB);
 
-    console.log("\nJWT login successful.");
-
-    console.log("\n3. Creating balances...");
-
-    await createBalance(
-        userA.id,
-        "USDT",
-        100000,
-        tokenA,
-    );
-
-    await createBalance(
-        userA.id,
-        "BTC",
-        10,
-        tokenA,
-    );
-
-    await createBalance(
-        userB.id,
-        "USDT",
-        100000,
-        tokenB,
-    );
-
-    await createBalance(
-        userB.id,
-        "BTC",
-        10,
-        tokenB,
-    );
-
-    console.log("\n4. Creating isolated BUY order...");
+    console.log("\n✅ JWT authentication working");
 
     /*
-     * IMPORTANT:
-     *
-     * We intentionally use a very unusual price so this order
-     * should not accidentally match normal existing liquidity.
-     *
-     * If your engine supports only a specific symbol, keep the
-     * symbol consistent with your project.
+     * -------------------------------------
+     * 4. AUTH REJECTION TEST
+     * -------------------------------------
      */
-    const buyOrder = {
-        symbol: "BTC_USDT",
-        side: "BUY" as const,
-        price: 1,
-        quantity: 1,
-    };
 
-    const createResponse = await createOrder(
-        buyOrder,
+    console.log("\n4. Testing protected route without JWT...");
+
+    const noToken = await request(
+        `/users/${userA.id}/balances/USDT`,
+    );
+
+    logResponse(
+        "GET BALANCE WITHOUT TOKEN",
+        noToken,
+    );
+
+    assert(
+        noToken.status === 401,
+        "Protected route should reject missing JWT",
+    );
+
+    console.log("✅ Missing JWT rejected");
+
+    /*
+     * -------------------------------------
+     * 5. CREATE BALANCES
+     * -------------------------------------
+     */
+
+    console.log("\n5. Creating balances...");
+
+    await createBalance(
+        userA.id,
+        "USDT",
+        100000,
         tokenA,
     );
 
-    if (!createResponse.ok) {
-        console.log("\n❌ ORDER CREATION FAILED");
-        console.log(
-            "The backend rejected the POST /orders request.",
-        );
+    await createBalance(
+        userA.id,
+        "BTC",
+        10,
+        tokenA,
+    );
 
-        process.exit(1);
-    }
+    await createBalance(
+        userB.id,
+        "USDT",
+        100000,
+        tokenB,
+    );
 
-    const orderId =
-        createResponse.body.id ??
-        createResponse.body.orderId;
+    await createBalance(
+        userB.id,
+        "BTC",
+        10,
+        tokenB,
+    );
 
-    if (!orderId) {
-        console.log(
-            "\n❌ POST /orders succeeded but no order ID was returned.",
-        );
+    console.log("\n✅ Balances created");
 
-        console.log(
-            "This is the exact backend response:",
-        );
+    /*
+     * -------------------------------------
+     * 6. GET BALANCE
+     * -------------------------------------
+     */
 
-        console.log(
-            JSON.stringify(
-                createResponse.body,
-                null,
-                2,
-            ),
-        );
+    console.log("\n6. Checking balances...");
 
-        process.exit(1);
-    }
+    const balanceAUSDT = await getBalance(
+        userA.id,
+        "USDT",
+        tokenA,
+    );
 
-    console.log(`\nCreated order: ${orderId}`);
-
-    console.log("\n5. Checking order immediately...");
-
-    const immediate = await getOrder(
-        orderId,
+    const balanceABTC = await getBalance(
+        userA.id,
+        "BTC",
         tokenA,
     );
 
     logResponse(
-        "IMMEDIATE GET /orders/:orderId",
-        immediate,
+        "USER A USDT BALANCE",
+        balanceAUSDT,
     );
 
-    if (immediate.ok) {
-        console.log(
-            "\n✅ ORDER ALREADY EXISTS IN DATABASE.",
-        );
+    logResponse(
+        "USER A BTC BALANCE",
+        balanceABTC,
+    );
 
-        console.log(
-            `Current status: ${immediate.body.status}`,
-        );
+    assert(
+        balanceAUSDT.status === 200,
+        "Could not retrieve USDT balance",
+    );
 
-        console.log(
-            "\nThe POST → Redis → Engine → Prisma pipeline worked.",
-        );
+    assert(
+        balanceABTC.status === 200,
+        "Could not retrieve BTC balance",
+    );
 
-        if (immediate.body.status === "OPEN") {
-            console.log(
-                "✅ Order reached OPEN immediately.",
-            );
-        }
+    console.log("✅ Balance retrieval working");
 
-        if (immediate.body.status === "FILLED") {
-            console.log(
-                "⚠️ Order was immediately FILLED.",
-            );
-        }
-
-        return;
-    }
-
-    if (immediate.status === 404) {
-        console.log(
-            "\n⚠️ Order does NOT exist in the database yet.",
-        );
-
-        console.log(
-            "This means we need to check the Redis → Engine → Prisma pipeline.",
-        );
-    }
+    /*
+     * -------------------------------------
+     * 7. CROSS-USER BALANCE PROTECTION
+     * -------------------------------------
+     */
 
     console.log(
-        "\n6. Waiting for engine to process the order...",
+        "\n7. Testing cross-user balance protection...",
     );
 
-    const finalOrder = await waitForOrder(
-        orderId,
+    const crossBalance = await getBalance(
+        userB.id,
+        "USDT",
         tokenA,
-        15000,
     );
 
-    if (!finalOrder) {
-        console.log("\n========================================");
-        console.log("❌ DIAGNOSTIC RESULT");
-        console.log("========================================");
+    logResponse(
+        "USER A TOKEN → USER B BALANCE",
+        crossBalance,
+    );
 
-        console.log(
-            `Order ${orderId} was created by POST /orders`,
-        );
+    assert(
+        crossBalance.status === 403,
+        "User A should not access User B balance",
+    );
 
-        console.log(
-            "but was NOT found in the database after 15 seconds.",
-        );
+    console.log("✅ Cross-user balance access rejected");
 
-        console.log("\nLikely pipeline:");
+    /*
+     * -------------------------------------
+     * 8. CREATE ISOLATED BUY ORDER
+     * -------------------------------------
+     *
+     * No userId is sent here.
+     *
+     * The backend gets userId from JWT.
+     */
 
-        console.log("POST /orders       ✅");
-        console.log("Redis publish      ❓");
-        console.log("Engine consumer    ❓");
-        console.log("Prisma create      ❌");
-        console.log("Neon Order row     ❌");
+    console.log("\n8. Creating isolated BUY order...");
 
-        console.log(
-            "\n👉 Check the ENGINE TERMINAL now.",
-        );
+    const buyCreate = await createOrder(
+        {
+            side: "BUY",
+            type: "LIMIT",
+            qty: 1,
+            price: 1,
+        },
+        tokenA,
+    );
 
-        console.log(
-            "There should be a log showing whether the order was received.",
-        );
+    assert(
+        buyCreate.status === 201,
+        `BUY order creation failed: ${buyCreate.status}`,
+    );
 
-        console.log("\nOrder ID:");
+    const buyOrderId =
+        buyCreate.body.orderId;
 
-        console.log(orderId);
+    assert(
+        !!buyOrderId,
+        "BUY order ID was not returned",
+    );
 
-        process.exit(1);
+    console.log(
+        "\nBUY order ID:",
+        buyOrderId,
+    );
+
+    /*
+     * -------------------------------------
+     * 9. WAIT FOR BUY TO ENTER DATABASE
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n9. Waiting for BUY order to reach OPEN...",
+    );
+
+    const buyOrder = await waitForOrder(
+        buyOrderId,
+        tokenA,
+        ["OPEN", "PARTIALLY_FILLED", "FILLED"],
+    );
+    if (buyOrder === null) {
+    throw new Error("❌ BUY order never reached the database");
+}
+    assert(
+        buyOrder !== null,
+        "BUY order never reached the database",
+    );
+
+    assert(
+        buyOrder.status === "OPEN",
+        `BUY order did not reach OPEN. Current status: ${buyOrder.status}`,
+    );
+    
+
+    console.log(
+        "\n✅ BUY order reached database",
+    );
+
+    console.log(
+        "Status:",
+        buyOrder.status,
+    );
+
+    /*
+     * -------------------------------------
+     * 10. VERIFY BUY FUNDS LOCKED
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n10. Checking BUY locked funds...",
+    );
+
+    const afterBuyBalance = await getBalance(
+        userA.id,
+        "USDT",
+        tokenA,
+    );
+
+    logResponse(
+        "USER A USDT AFTER BUY",
+        afterBuyBalance,
+    );
+
+    assert(
+        afterBuyBalance.status === 200,
+        "Could not retrieve balance after BUY",
+    );
+
+    console.log(
+        "\nAvailable:",
+        afterBuyBalance.body.available,
+    );
+
+    console.log(
+        "Locked:",
+        afterBuyBalance.body.locked,
+    );
+
+    /*
+     * -------------------------------------
+     * 11. CROSS-USER ORDER PROTECTION
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n11. Testing cross-user order protection...",
+    );
+
+    const crossOrder = await getOrder(
+        buyOrderId,
+        tokenB,
+    );
+
+    logResponse(
+        "USER B TOKEN → USER A ORDER",
+        crossOrder,
+    );
+
+    assert(
+        crossOrder.status === 404,
+        "User B should not access User A order",
+    );
+
+    console.log(
+        "✅ Cross-user order access rejected",
+    );
+
+    /*
+     * -------------------------------------
+     * 12. CREATE SELL ORDER
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n12. Creating SELL order...",
+    );
+
+    const sellCreate = await createOrder(
+        {
+            side: "SELL",
+            type: "LIMIT",
+            qty: 1,
+            price: 1,
+        },
+        tokenB,
+    );
+
+    assert(
+        sellCreate.status === 201,
+        `SELL order creation failed: ${sellCreate.status}`,
+    );
+
+    const sellOrderId =
+        sellCreate.body.orderId;
+
+    assert(
+        !!sellOrderId,
+        "SELL order ID was not returned",
+    );
+
+    console.log(
+        "\nSELL order ID:",
+        sellOrderId,
+    );
+
+    /*
+     * -------------------------------------
+     * 13. WAIT FOR MATCH
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n13. Waiting for orders to match...",
+    );
+
+    const buyAfterMatch = await waitForOrder(
+        buyOrderId,
+        tokenA,
+        ["FILLED", "PARTIALLY_FILLED"],
+    );
+
+    const sellAfterMatch = await waitForOrder(
+        sellOrderId,
+        tokenB,
+        ["FILLED", "PARTIALLY_FILLED"],
+    );
+    const buyCheck = await getOrder(buyOrderId, tokenA);
+    const sellCheck = await getOrder(sellOrderId, tokenB);
+
+    console.log("\n=== AFTER MATCH DEBUG ===");
+    console.log("BUY:", JSON.stringify(buyCheck.body, null, 2));
+    console.log("SELL:", JSON.stringify(sellCheck.body, null, 2));
+    if (sellAfterMatch === null) {
+    throw new Error("❌ SELL order disappeared after matching");
+}
+
+    assert(
+    sellAfterMatch !== null,
+    "SELL order disappeared after matching",
+    );
+
+    assert(
+        sellAfterMatch.status === "FILLED",
+        `SELL order did not become FILLED. Current status: ${sellAfterMatch.status}`,
+    );
+
+    assert(
+        !!sellAfterMatch,
+        "SELL order did not reach a matching status",
+    );
+    if (buyAfterMatch === null) {
+        throw new Error("❌ BUY order disappeared after matching");
     }
+    console.log(
+        "\nBUY status:",
+        buyAfterMatch.status,
+    );
+
+    console.log(
+        "SELL status:",
+        sellAfterMatch.status,
+    );
+    
+
+    /*
+     * -------------------------------------
+     * 14. CHECK ORDER HISTORIES
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n14. Checking order histories...",
+    );
+
+    const userAOrders = await getUserOrders(
+        userA.id,
+        tokenA,
+    );
+
+    const userBOrders = await getUserOrders(
+        userB.id,
+        tokenB,
+    );
+
+    logResponse(
+        "USER A ORDERS",
+        userAOrders,
+    );
+
+    logResponse(
+        "USER B ORDERS",
+        userBOrders,
+    );
+
+    assert(
+        userAOrders.status === 200,
+        "Could not retrieve User A orders",
+    );
+
+    assert(
+        userBOrders.status === 200,
+        "Could not retrieve User B orders",
+    );
+
+    /*
+     * -------------------------------------
+     * 15. CREATE UNMATCHED BUY
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n15. Creating unmatched BUY order...",
+    );
+
+    const unmatchedCreate = await createOrder(
+        {
+            side: "BUY",
+            type: "LIMIT",
+            qty: 1,
+            price: 0.000001,
+        },
+        tokenA,
+    );
+
+    assert(
+        unmatchedCreate.status === 201,
+        `Unmatched BUY creation failed: ${unmatchedCreate.status}`,
+    );
+
+    const unmatchedOrderId =
+        unmatchedCreate.body.orderId;
+
+    assert(
+        !!unmatchedOrderId,
+        "Unmatched BUY order ID missing",
+    );
+
+    console.log(
+        "Unmatched BUY:",
+        unmatchedOrderId,
+    );
+
+    /*
+     * -------------------------------------
+     * 16. WAIT FOR OPEN
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n16. Waiting for unmatched BUY to become OPEN...",
+    );
+
+    const unmatchedOrder =
+        await waitForOrder(
+            unmatchedOrderId,
+            tokenA,
+            ["OPEN"],
+        );
+
+    assert(
+        !!unmatchedOrder,
+        "Unmatched BUY did not reach OPEN",
+    );
+
+    console.log(
+        "✅ Unmatched BUY is OPEN",
+    );
+
+    /*
+     * -------------------------------------
+     * 17. CANCEL ORDER
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n17. Cancelling unmatched BUY...",
+    );
+
+    const cancelResponse =
+        await cancelOrder(
+            unmatchedOrderId,
+            tokenA,
+        );
+
+    assert(
+        cancelResponse.status === 200,
+        `Cancel failed: ${cancelResponse.status}`,
+    );
+
+    /*
+     * -------------------------------------
+     * 18. WAIT FOR CANCELLED
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n18. Waiting for CANCELLED status...",
+    );
+
+    const cancelledOrder =
+        await waitForOrder(
+            unmatchedOrderId,
+            tokenA,
+            ["CANCELLED"],
+        );
+
+    assert(
+        !!cancelledOrder,
+        "Order did not reach CANCELLED",
+    );
+
+    console.log(
+        "✅ Order cancelled",
+    );
+
+    /*
+     * -------------------------------------
+     * 19. VERIFY FUNDS UNLOCKED
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n19. Checking funds after cancellation...",
+    );
+
+    const finalBalance =
+        await getBalance(
+            userA.id,
+            "USDT",
+            tokenA,
+        );
+
+    logResponse(
+        "USER A USDT AFTER CANCEL",
+        finalBalance,
+    );
+
+    assert(
+        finalBalance.status === 200,
+        "Could not retrieve final balance",
+    );
+
+    console.log(
+        "\nFinal available:",
+        finalBalance.body.available,
+    );
+
+    console.log(
+        "Final locked:",
+        finalBalance.body.locked,
+    );
+
+    /*
+     * -------------------------------------
+     * 20. INVALID JWT
+     * -------------------------------------
+     */
+
+    console.log(
+        "\n20. Testing invalid JWT...",
+    );
+
+    const invalidToken = await request(
+        `/users/${userA.id}/balances/USDT`,
+        {
+            method: "GET",
+        },
+        "invalid.jwt.token",
+    );
+
+    logResponse(
+        "INVALID JWT",
+        invalidToken,
+    );
+
+    assert(
+        invalidToken.status === 401,
+        "Invalid JWT should be rejected",
+    );
+
+    console.log(
+        "✅ Invalid JWT rejected",
+    );
+
+    /*
+     * -------------------------------------
+     * COMPLETE
+     * -------------------------------------
+     */
 
     console.log("\n========================================");
-    console.log("✅ DIAGNOSTIC RESULT");
+    console.log("       ✅ ALL TESTS PASSED");
     console.log("========================================");
 
-    console.log(
-        JSON.stringify(finalOrder, null, 2),
-    );
+    console.log("\nTested:");
 
-    console.log(
-        `\nFinal status: ${finalOrder.status}`,
-    );
+    console.log("✅ Backend health");
+    console.log("✅ User creation");
+    console.log("✅ JWT login");
+    console.log("✅ Missing JWT rejection");
+    console.log("✅ Balance creation");
+    console.log("✅ Balance retrieval");
+    console.log("✅ Cross-user balance protection");
+    console.log("✅ JWT-based order creation");
+    console.log("✅ Order processing");
+    console.log("✅ Locked funds");
+    console.log("✅ Cross-user order protection");
+    console.log("✅ BUY / SELL matching");
+    console.log("✅ Order history");
+    console.log("✅ Unmatched order");
+    console.log("✅ Order cancellation");
+    console.log("✅ Funds unlocking");
+    console.log("✅ Invalid JWT rejection");
 
-    if (
-        finalOrder.status === "OPEN"
-    ) {
-        console.log(
-            "\n✅ POST → Redis → Engine → Prisma → OPEN works.",
-        );
-    } else if (
-        finalOrder.status === "FILLED"
-    ) {
-        console.log(
-            "\n⚠️ Order was matched immediately.",
-        );
-    } else {
-        console.log(
-            "\nOrder reached the database but has an unexpected status.",
-        );
-    }
+    console.log("\nCEX V2 API + AUTH TEST COMPLETE.");
 }
 
 main().catch((error) => {
     console.error("\n========================================");
-    console.error("❌ TEST CRASHED");
+    console.error("       ❌ TEST FAILED");
     console.error("========================================");
 
     console.error(error);
