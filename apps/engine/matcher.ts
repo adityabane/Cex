@@ -150,5 +150,8 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
             },
         });
         return trade;
+    },{
+        maxWait:10000,
+        timeout:15000,
     });
 }

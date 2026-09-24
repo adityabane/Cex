@@ -4,7 +4,7 @@ import {createUser} from "../engine/user"
 import {publishOrder} from "../engine/redis-order-queue";
 import {createBalance} from "../engine/balance";
 import {getBalance} from "../engine/balance";
-import {getUserOrders} from "../engine/order";
+import {getUserOrders,getOrderById} from "../engine/order";
 import { redis } from "../engine/redis";
 const app = express();
 app.use(express.json());
@@ -158,6 +158,23 @@ app.get("/users/:userId/orders", async (req, res) => {
         });
     }
 });
+app.get("/orders/:orderId",async (req , res )=>{
+    try{
+        const {orderId} = req.params;
+        const order = await getOrderById(orderId);
+        if(!order){
+            return res.status(404).json({
+                error:"Order not Found",
+            });
+        }
+        res.json(order)
+    }catch(error){
+        console.error("Get order error:",error);
+        res.status(500).json({
+            error:"Failed to get order",
+        })
+    }
+})
 app.listen(3000,()=>{
     console.log("CEX v2 Backend Running on http://localhost:3000")
 });

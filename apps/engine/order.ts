@@ -127,3 +127,10 @@ export async function getUserOrders(userId:string){
         }
     })
 }
+export async function getOrderById(orderId:string){
+    return prisma.order.findUnique({
+        where:{
+            id:orderId,
+        },
+    });
+}
