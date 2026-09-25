@@ -285,7 +285,92 @@ async function waitForOrder(
 
     return null;
 }
+async function testRedisConsumerRecovery(
+    token: string,
+) {
+    console.log("\n========================================");
+    console.log("   REDIS CONSUMER RECOVERY TEST");
+    console.log("========================================");
 
+    console.log(
+        "\nThis test requires the Redis consumer to be running.",
+    );
+
+    /*
+     * Create an order that will remain OPEN.
+     *
+     * The important part is that the order is sent through:
+     *
+     * API
+     *   ↓
+     * Redis Stream
+     *   ↓
+     * Redis Consumer Group
+     *   ↓
+     * Engine
+     */
+
+    console.log(
+        "\nCreating order for Redis consumer test...",
+    );
+
+    const response = await createOrder(
+        {
+            side: "BUY",
+            type: "LIMIT",
+            qty: 1,
+            price: 0.000001,
+        },
+        token,
+    );
+
+    assert(
+        response.status === 201,
+        `Redis recovery test order creation failed: ${response.status}`,
+    );
+
+    const orderId = response.body.orderId;
+
+    assert(
+        !!orderId,
+        "Redis recovery test order ID missing",
+    );
+
+    console.log(
+        "\nRecovery test order:",
+        orderId,
+    );
+
+    /*
+     * Wait for the engine to process it.
+     */
+
+    const order = await waitForOrder(
+        orderId,
+        token,
+        ["OPEN"],
+    );
+    if (order===null){
+        throw new Error("Order is null")
+    }
+    assert(
+        !!order,
+        "Order was not processed by Redis consumer",
+    );
+
+    console.log(
+        "\n✅ Redis consumer processed the order",
+    );
+
+    console.log(
+        "Order status:",
+        order.status,
+    );
+
+    console.log(
+        "\n✅ Redis consumer recovery test completed",
+    );
+}
 async function main() {
     console.log("========================================");
     console.log("       CEX V2 COMPLETE API TEST");
@@ -945,7 +1030,7 @@ async function main() {
      * COMPLETE
      * -------------------------------------
      */
-
+    await testRedisConsumerRecovery(tokenA);
     console.log("\n========================================");
     console.log("       ✅ ALL TESTS PASSED");
     console.log("========================================");

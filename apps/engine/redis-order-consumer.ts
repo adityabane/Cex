@@ -6,13 +6,15 @@ import { getOrderBookSnapshot } from "../backend/orderbook-snapshot";
 import { publishDepthEvent } from "./redis-depth";
 import { publishOrderStatusEvent } from "./redis-order-status";
 const ORDER_STREAM = "cex:orders";
+const CONSUMER_GROUP = "cex-order-engine";
+const CONSUMER_NAME = "engine-main";
 type RedisMessage = [
     string,string[]
 ];
 type RedisStreamResult = [
     string,RedisMessage[]
 ][];
-let lastId = "0-0";
+
 
 function parseFields(fields:string[]){
     const data: Record<string,string> = {};
@@ -26,99 +28,208 @@ function parseFields(fields:string[]){
     }
     return data;
 }
+async function setupConsumerGroup() {
+    try {
+        await redis.xgroup(
+            ORDER_STREAM,
+            {
+                type: "CREATE",
+                group: CONSUMER_GROUP,
+                id: "0",
+                options: {
+                    MKSTREAM: true,
+                },
+            },
+        );
+        console.log(
+            `Redis consumer group "${CONSUMER_GROUP}" created`,
+        );
+    } catch (error) {
+        if (
+            error instanceof Error &&
+            error.message.includes("BUSYGROUP")
+        ) {
+            return;
+        }
+        throw error;
+    }
+}
+async function processOrderMessage(
+    messageId: string,
+    fields: string[],
+) {
+    const order = parseFields(fields);
+    console.log("Order received from Redis:");
+    console.log(order);
+    if (order.action === "CANCEL") {
+        if (!order.orderId) {
+            throw new Error(
+                "Missing orderId in cancellation event",
+            );
+        }
+        if (!order.userId) {
+            throw new Error(
+                "Missing userId in cancellation event",
+            );
+        }
+        const cancelledOrder = await cancelOrder(
+            order.orderId,
+            order.userId,
+        );
+        await publishOrderStatusEvent({
+            type: "ORDER_STATUS",
+            userId: cancelledOrder.userId,
+            orderId: cancelledOrder.id,
+            status: cancelledOrder.status,
+            remainingQty: Number(
+                cancelledOrder.remainingQty,
+            ),
+        });
+        const snapshot = await getOrderBookSnapshot(
+            cancelledOrder.asset,
+        );
+        await publishDepthEvent({
+            type: "DEPTH",
+            asset: cancelledOrder.asset,
+            bids: snapshot.bids,
+            asks: snapshot.asks,
+        });
+        console.log(
+            `Order ${order.orderId} cancelled`,
+        );
+    }else {
+        if (!order.orderId) {
+            throw new Error(
+                "Missing orderId in Redis event",
+            );
+        }
+        if (!order.userId) {
+            throw new Error(
+                "Missing userId in Redis event",
+            );
+        }
+        if (!order.side) {
+            throw new Error(
+                "Missing side in Redis event",
+            );
+        }
+        if (!order.type) {
+            throw new Error(
+                "Missing type in Redis event",
+            );
+        }
+        if (!order.qty) {
+            throw new Error(
+                "Missing qty in Redis event",
+            );
+        }
+        await submitOrder(
+            order.orderId,
+            order.userId,
+            order.side as OrderSide,
+            order.type as OrderType,
+            Number(order.qty),
+            order.price !== undefined
+                ? Number(order.price)
+                : undefined,
+        );
+        console.log(
+            `Order ${order.orderId} processed`,
+        );
+    }
+    await redis.xack(
+        ORDER_STREAM,
+        CONSUMER_GROUP,
+        messageId,
+    );
+    console.log(
+        `Redis message ${messageId} acknowledged`,
+    );
+}
+async function readMessages(
+    messageId: "0" | ">",
+) {
+    return await redis.xreadgroup(
+        CONSUMER_GROUP,
+        CONSUMER_NAME,
+        [ORDER_STREAM],
+        [messageId],
+        {
+            count: 10,
+        },
+    ) as RedisStreamResult | null;
+}
+async function consumeOrders() {
+    await setupConsumerGroup();
 
-async function consumeOrders(){
-    console.log("Redis order consumer started...");
-    while(true){
-        try{
-            const result = await redis.xread(ORDER_STREAM,lastId) as RedisStreamResult | null;
-            if(result){
-                for (const [_streamName,messages] of result){
-                    for(const [messageId,fields] of messages){
-                        lastId = messageId;
-                        const order = parseFields(fields);
-                        console.log("Order received from Redis:");
-                        console.log(order);
-                        if (order.action === "CANCEL") {
-                            if (!order.orderId) {
-                                throw new Error("Missing orderId in cancellation event");
-                            }
+    console.log(
+        `Redis order consumer started as "${CONSUMER_NAME}"`,
+    );
 
-                            if (!order.userId) {
-                                throw new Error("Missing userId in cancellation event");
-                            }
+    while (true) {
+        try {
+            /*
+             * STEP 1
+             *
+             * Recover messages that were previously delivered
+             * to this consumer but were never acknowledged.
+             */
+            const pending = await readMessages("0");
 
-                            const cancelledOrder = await cancelOrder(
-                                order.orderId,
-                                order.userId,
-                            );
-                            await publishOrderStatusEvent({
-                                type: "ORDER_STATUS",
-                                userId: cancelledOrder.userId,
-                                orderId: cancelledOrder.id,
-                                status: cancelledOrder.status,
-                                remainingQty: Number(cancelledOrder.remainingQty),
-                            });
-
-                            const snapshot = await getOrderBookSnapshot(
-                                cancelledOrder.asset,
-                            );
-
-                            await publishDepthEvent({
-                                type: "DEPTH",
-                                asset: cancelledOrder.asset,
-                                bids: snapshot.bids,
-                                asks: snapshot.asks,
-                            });
-
-                            console.log(
-                                `Order ${order.orderId} cancelled`
-                            );
-
-                            continue;
-                        }
-                        if (!order.orderId) {
-                            throw new Error("Missing orderId in Redis event");
-                        }
-
-                        if (!order.userId) {
-                            throw new Error("Missing userId in Redis event");
-                        }
-
-                        if (!order.side) {
-                            throw new Error("Missing side in Redis event");
-                        }
-
-                        if (!order.type) {
-                            throw new Error("Missing type in Redis event");
-                        }
-
-                        if (!order.qty) {
-                            throw new Error("Missing qty in Redis event");
-                        }
-                        await submitOrder(
-                            order.orderId,
-                            order.userId,
-                            order.side as OrderSide,
-                            order.type as OrderType,
-                            Number(order.qty),
-                            order.price !== undefined
-                                ? Number(order.price)
-                                : undefined
+            if (pending) {
+                for (const [_streamName, messages] of pending) {
+                    for (const [messageId, fields] of messages) {
+                        await processOrderMessage(
+                            messageId,
+                            fields,
                         );
+                    }
+                }
 
-                        console.log(
-                            `Order ${order.orderId} processed`
+                continue;
+            }
+
+            /*
+             * STEP 2
+             *
+             * No pending messages.
+             * Now read new messages.
+             */
+            const result = await readMessages(">");
+
+            if (result) {
+                for (const [_streamName, messages] of result) {
+                    for (const [messageId, fields] of messages) {
+                        await processOrderMessage(
+                            messageId,
+                            fields,
                         );
                     }
                 }
             }
-            await new Promise((resolve)=>setTimeout(resolve,1000));
 
-        }catch(error){
-            console.error("Redis consumer error:",error);
-            await new Promise((resolve)=>setTimeout(resolve,2000));
+            await new Promise((resolve) =>
+                setTimeout(resolve, 1000),
+            );
+        } catch (error) {
+            console.error(
+                "Redis consumer error:",
+                error,
+            );
+
+            /*
+             * IMPORTANT:
+             *
+             * We do NOT ACK the failed message.
+             *
+             * Therefore Redis keeps it in the
+             * consumer group's pending entries.
+             */
+            await new Promise((resolve) =>
+                setTimeout(resolve, 2000),
+            );
         }
     }
 }
-consumeOrders()
+
+consumeOrders();
