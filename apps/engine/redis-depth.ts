@@ -12,14 +12,16 @@ export type DepthEvent = {
 export async function publishDepthEvent(
     event: DepthEvent
 ) {
-    return redis.xadd(
+        return redis.xadd(
         MARKET_DATA_STREAM,
         "*",
-        {
-            type: event.type,
-            asset: event.asset,
-            bids: JSON.stringify(event.bids),
-            asks: JSON.stringify(event.asks),
-        }
+        "type",
+        event.type,
+        "asset",
+        event.asset,
+        "bids",
+        JSON.stringify(event.bids),
+        "asks",
+        JSON.stringify(event.asks),
     );
 }

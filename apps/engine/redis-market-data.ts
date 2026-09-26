@@ -9,13 +9,16 @@ export type TradeMarketEvent = {
 export async function publishTradeEvent(
     event:TradeMarketEvent
 ){
-    return redis.xadd(
-        MARKET_DATA_STREAM,"*",
-        {
-            type:event.type,
-            asset:event.asset,
-            price:event.price.toString(),
-            quantity:event.quantity.toString(),
-        }
+        return redis.xadd(
+        MARKET_DATA_STREAM,
+        "*",
+        "type",
+        event.type,
+        "asset",
+        event.asset,
+        "price",
+        event.price.toString(),
+        "quantity",
+        event.quantity.toString(),
     );
 }

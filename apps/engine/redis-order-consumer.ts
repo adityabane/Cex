@@ -8,13 +8,8 @@ import { publishOrderStatusEvent } from "./redis-order-status";
 const ORDER_STREAM = "cex:orders";
 const CONSUMER_GROUP = "cex-order-engine";
 const CONSUMER_NAME = "engine-main";
-type RedisMessage = [
-    string,string[]
-];
-type RedisStreamResult = [
-    string,RedisMessage[]
-][];
-
+type RedisMessage = [string,string[]];
+type RedisStreamResult = [string,RedisMessage[]][];
 
 function parseFields(fields:string[]){
     const data: Record<string,string> = {};
@@ -31,15 +26,11 @@ function parseFields(fields:string[]){
 async function setupConsumerGroup() {
     try {
         await redis.xgroup(
+            "CREATE",
             ORDER_STREAM,
-            {
-                type: "CREATE",
-                group: CONSUMER_GROUP,
-                id: "0",
-                options: {
-                    MKSTREAM: true,
-                },
-            },
+            CONSUMER_GROUP,
+            "0",
+            "MKSTREAM",
         );
         console.log(
             `Redis consumer group "${CONSUMER_GROUP}" created`,
@@ -150,13 +141,14 @@ async function readMessages(
     messageId: "0" | ">",
 ) {
     return await redis.xreadgroup(
+        "GROUP",
         CONSUMER_GROUP,
         CONSUMER_NAME,
-        [ORDER_STREAM],
-        [messageId],
-        {
-            count: 10,
-        },
+        "COUNT",
+        10,
+        "STREAMS",
+        ORDER_STREAM,
+        messageId,
     ) as RedisStreamResult | null;
 }
 async function consumeOrders() {
@@ -168,15 +160,8 @@ async function consumeOrders() {
 
     while (true) {
         try {
-            /*
-             * STEP 1
-             *
-             * Recover messages that were previously delivered
-             * to this consumer but were never acknowledged.
-             */
             const pending = await readMessages("0");
-
-            if (pending) {
+            if (pending && pending.some(([, messages]) => messages.length > 0)) {
                 for (const [_streamName, messages] of pending) {
                     for (const [messageId, fields] of messages) {
                         await processOrderMessage(

@@ -13,15 +13,18 @@ export type OrderStatusEvent = {
 export async function publishOrderStatusEvent(
     event: OrderStatusEvent,
 ) {
-    return redis.xadd(
+        return redis.xadd(
         MARKET_DATA_STREAM,
         "*",
-        {
-            type: event.type,
-            userId: event.userId,
-            orderId: event.orderId,
-            status: event.status,
-            remainingQty: event.remainingQty.toString(),
-        },
+        "type",
+        event.type,
+        "userId",
+        event.userId,
+        "orderId",
+        event.orderId,
+        "status",
+        event.status,
+        "remainingQty",
+        event.remainingQty.toString(),
     );
 }

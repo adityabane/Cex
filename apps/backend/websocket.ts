@@ -12,15 +12,11 @@ type RedisStreamResult = [string,RedisMessage[]][];
 async function setupConsumerGroup(){
     try{
         await redis.xgroup(
+            "CREATE",
             MARKET_DATA_STREAM,
-            {
-                type:"CREATE",
-                group:CONSUMER_GROUP,
-                id:"0",
-                options:{
-                    MKSTREAM:true,
-                }
-            }
+            CONSUMER_GROUP,
+            "0",
+            "MKSTREAM",
         );
         console.log(`Redis consumer group "${CONSUMER_GROUP}" created`);
     }catch(error){
@@ -60,13 +56,14 @@ async function consumeMarketData() {
 
         try {
             const result = await redis.xreadgroup(
+                "GROUP",
                 CONSUMER_GROUP,
                 CONSUMER_NAME,
-                [MARKET_DATA_STREAM],
-                [">"],
-                {
-                    count:10,
-                }
+                "COUNT",
+                10,
+                "STREAMS",
+                MARKET_DATA_STREAM,
+                ">",
             ) as RedisStreamResult | null;
 
             if (!result) {

@@ -45,24 +45,23 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
         status: "OPEN",
     };
     ValidateOrder(order);
-    if (type === "MARKET") {
-        throw new Error(
-            "Market orders will be handled by the matching engine"
-        );
-    }
-    if (price === undefined) {
-        throw new Error("Price Undefined");
-    }
-    const requiredAmount =
-        side === "BUY"
-            ? qty * price
-            : qty;
+    if (type === "LIMIT") {
+        if (price === undefined) {
+            throw new Error("Price Undefined");
+        }
 
-    const assetToLock =
-        side === "BUY"
-            ? "USDT"
-            : "BTC";
-    await lockBalance(userId,assetToLock,requiredAmount);
+        const requiredAmount =
+            side === "BUY"
+                ? qty * price
+                : qty;
+
+        const assetToLock =
+            side === "BUY"
+                ? "USDT"
+                : "BTC";
+
+        await lockBalance(userId, assetToLock, requiredAmount);
+    }
     return prisma.order.create({
         data:{
             id,
@@ -87,9 +86,10 @@ export function ValidateOrder(order:Order):void{
     if(order.qty<=0){
         throw new Error("Invalid Order Quantity");
     }
-    
-    if(order.price===undefined || order.price<=0){
-        throw new Error("Invalid Price Entry");
+    if(order.type === "LIMIT"){
+        if(order.price===undefined || order.price<=0){
+            throw new Error("Invalid Price Entry");
+        }
     }
 }
 export function LockOrderBalance(account:Account,order:Order):void{

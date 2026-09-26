@@ -127,6 +127,11 @@ app.delete("/orders/:orderId",authMiddleware, async (req:AuthRequest, res) => {
     try {
         const { orderId } = req.params;
         const  userId  = req.userId;
+        if (typeof orderId !== "string") {
+            return res.status(400).json({
+                error: "Invalid order ID",
+            });
+        }
 
         if (!userId) {
             return res.status(400).json({
@@ -137,11 +142,12 @@ app.delete("/orders/:orderId",authMiddleware, async (req:AuthRequest, res) => {
         const redisMessageId = await redis.xadd(
             "cex:orders",
             "*",
-            {
-                action:"CANCEL",
-                orderId,
-                userId,
-            }
+            "action",
+            "CANCEL",
+            "orderId",
+            orderId,
+            "userId",
+            userId,
         );
 
         return res.json({
