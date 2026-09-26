@@ -240,7 +240,38 @@ async function cancelOrder(
 
     return response;
 }
+async function waitForBalance(
+    userId: string,
+    asset: string,
+    token: string,
+    expectedAvailable: number,
+    expectedLocked: number,
+    timeoutMs = 5000,
+) {
+    const start = Date.now();
 
+    while (Date.now() - start < timeoutMs) {
+        const response = await getBalance(
+            userId,
+            asset,
+            token,
+        );
+
+        if (
+            response.ok &&
+            Number(response.body.available) === expectedAvailable &&
+            Number(response.body.locked) === expectedLocked
+        ) {
+            return response.body;
+        }
+
+        await new Promise((resolve) =>
+            setTimeout(resolve, 100),
+        );
+    }
+
+    return null;
+}
 async function waitForOrder(
     orderId: string,
     token: string,
@@ -285,6 +316,7 @@ async function waitForOrder(
 
     return null;
 }
+
 async function testRedisConsumerRecovery(
     token: string,
 ) {
@@ -295,20 +327,6 @@ async function testRedisConsumerRecovery(
     console.log(
         "\nThis test requires the Redis consumer to be running.",
     );
-
-    /*
-     * Create an order that will remain OPEN.
-     *
-     * The important part is that the order is sent through:
-     *
-     * API
-     *   ↓
-     * Redis Stream
-     *   ↓
-     * Redis Consumer Group
-     *   ↓
-     * Engine
-     */
 
     console.log(
         "\nCreating order for Redis consumer test...",
@@ -341,18 +359,16 @@ async function testRedisConsumerRecovery(
         orderId,
     );
 
-    /*
-     * Wait for the engine to process it.
-     */
-
     const order = await waitForOrder(
         orderId,
         token,
         ["OPEN"],
     );
-    if (order===null){
-        throw new Error("Order is null")
+
+    if (order === null) {
+        throw new Error("Order is null");
     }
+
     assert(
         !!order,
         "Order was not processed by Redis consumer",
@@ -371,6 +387,376 @@ async function testRedisConsumerRecovery(
         "\n✅ Redis consumer recovery test completed",
     );
 }
+
+async function testMarketBuy() {
+    console.log("\n========================================");
+    console.log("       MARKET BUY TEST");
+    console.log("========================================");
+
+    /*
+     * Create fresh users so this test is independent
+     * from the previous LIMIT order tests.
+     */
+
+    const uniqueId =
+        `${Date.now()}-market-${crypto.randomUUID()}`;
+
+    const buyer = await createUser(
+        `market-buyer-${uniqueId}@test.com`,
+        "TestPassword123!",
+    );
+
+    const seller = await createUser(
+        `market-seller-${uniqueId}@test.com`,
+        "TestPassword123!",
+    );
+
+    const buyerToken = await login(buyer);
+    const sellerToken = await login(seller);
+
+    console.log("\n✅ Market test users created");
+
+    /*
+     * Buyer:
+     *
+     * 1000 USDT
+     * 0 BTC
+     *
+     * Seller:
+     *
+     * 0 USDT
+     * 1 BTC
+     */
+
+    await createBalance(
+        buyer.id,
+        "USDT",
+        1000,
+        buyerToken,
+    );
+
+    await createBalance(
+        buyer.id,
+        "BTC",
+        0,
+        buyerToken,
+    );
+
+    await createBalance(
+        seller.id,
+        "USDT",
+        0,
+        sellerToken,
+    );
+
+    await createBalance(
+        seller.id,
+        "BTC",
+        1,
+        sellerToken,
+    );
+
+    console.log("\n✅ Market test balances created");
+
+    /*
+     * Create LIMIT SELL:
+     *
+     * 1 BTC @ 100 USDT
+     */
+
+    console.log(
+        "\nCreating LIMIT SELL for market order...",
+    );
+
+    const sellCreate = await createOrder(
+        {
+            side: "SELL",
+            type: "LIMIT",
+            qty: 1,
+            price: 100,
+        },
+        sellerToken,
+    );
+
+    assert(
+        sellCreate.status === 201,
+        `Market test SELL creation failed: ${sellCreate.status}`,
+    );
+
+    const sellOrderId =
+        sellCreate.body.orderId;
+
+    assert(
+        !!sellOrderId,
+        "Market test SELL order ID missing",
+    );
+
+    console.log(
+        "\nMarket test SELL:",
+        sellOrderId,
+    );
+
+    const sellOrder = await waitForOrder(
+        sellOrderId,
+        sellerToken,
+        ["OPEN"],
+    );
+
+    assert(
+        !!sellOrder,
+        "Market test SELL did not reach OPEN",
+    );
+
+    console.log(
+        "\n✅ LIMIT SELL is OPEN",
+    );
+
+    /*
+     * Create MARKET BUY:
+     *
+     * 0.5 BTC
+     *
+     * No price is supplied.
+     */
+
+    console.log(
+        "\nCreating MARKET BUY...",
+    );
+
+    const marketBuyCreate = await createOrder(
+        {
+            side: "BUY",
+            type: "MARKET",
+            qty: 0.5,
+        },
+        buyerToken,
+    );
+
+    assert(
+        marketBuyCreate.status === 201,
+        `Market BUY creation failed: ${marketBuyCreate.status}`,
+    );
+
+    const marketBuyOrderId =
+        marketBuyCreate.body.orderId;
+
+    assert(
+        !!marketBuyOrderId,
+        "Market BUY order ID missing",
+    );
+
+    console.log(
+        "\nMarket BUY:",
+        marketBuyOrderId,
+    );
+
+    /*
+     * MARKET BUY should consume 0.5 BTC
+     * from the 1 BTC SELL order.
+     */
+
+    const marketBuyOrder = await waitForOrder(
+        marketBuyOrderId,
+        buyerToken,
+        ["FILLED", "PARTIALLY_FILLED", "CANCELLED"],
+    );
+    if(marketBuyOrder===null){
+        throw new Error("marketbuyorder is null")
+    }
+    assert(
+        !!marketBuyOrder,
+        "Market BUY did not reach a final state",
+    );
+
+    console.log(
+        "\nMarket BUY final status:",
+        marketBuyOrder.status,
+    );
+
+    assert(
+        marketBuyOrder.status === "FILLED",
+        `Market BUY should be FILLED but is ${marketBuyOrder.status}`,
+    );
+
+    assert(
+        Number(marketBuyOrder.remainingQty) === 0,
+        `Market BUY remaining quantity should be 0 but is ${marketBuyOrder.remainingQty}`,
+    );
+
+    console.log(
+        "\n✅ MARKET BUY FILLED",
+    );
+
+    /*
+     * Verify SELL.
+     */
+
+    const finalSellOrder = await waitForOrder(
+        sellOrderId,
+        sellerToken,
+        ["PARTIALLY_FILLED", "FILLED"],
+    );
+    if(finalSellOrder===null){
+        throw new Error("finalsellorder is null")
+    }
+    assert(
+        !!finalSellOrder,
+        "SELL order did not reach matching state",
+    );
+
+    assert(
+        finalSellOrder.status === "PARTIALLY_FILLED",
+        `SELL should be PARTIALLY_FILLED but is ${finalSellOrder.status}`,
+    );
+
+    assert(
+        Number(finalSellOrder.remainingQty) === 0.5,
+        `SELL remaining quantity should be 0.5 but is ${finalSellOrder.remainingQty}`,
+    );
+
+    console.log(
+        "\n✅ SELL partially filled correctly",
+    );
+
+    /*
+     * Verify buyer USDT balance.
+     *
+     * Trade:
+     *
+     * 0.5 BTC × 100 USDT = 50 USDT
+     */
+
+    const buyerUSDT = await waitForBalance(
+    buyer.id,
+    "USDT",
+    buyerToken,
+    950,
+    0,
+    );
+
+    assert(
+        !!buyerUSDT,
+        "Buyer USDT balance did not settle correctly",
+    );
+
+    console.log(
+        "\nMARKET BUYER USDT BALANCE:",
+        JSON.stringify(buyerUSDT, null, 2),
+    );
+
+    assert(
+        Number(buyerUSDT.available) === 950,
+        `Buyer available USDT should be 950 but is ${buyerUSDT.available}`,
+    );
+
+    assert(
+        Number(buyerUSDT.locked) === 0,
+        `Buyer locked USDT should be 0 but is ${buyerUSDT.locked}`,
+    );
+
+
+
+    console.log(
+        "\n✅ Buyer USDT settlement correct",
+    );
+
+    /*
+     * Verify buyer BTC balance.
+     */
+
+    const buyerBTC = await getBalance(
+        buyer.id,
+        "BTC",
+        buyerToken,
+    );
+
+    logResponse(
+        "MARKET BUYER BTC BALANCE",
+        buyerBTC,
+    );
+
+    assert(
+        buyerBTC.status === 200,
+        "Could not retrieve market buyer BTC balance",
+    );
+
+    assert(
+        Number(buyerBTC.body.available) === 0.5,
+        `Buyer BTC should be 0.5 but is ${buyerBTC.body.available}`,
+    );
+
+    console.log(
+        "\n✅ Buyer BTC settlement correct",
+    );
+
+    /*
+     * Verify seller BTC balance.
+     */
+
+    const sellerBTC = await getBalance(
+        seller.id,
+        "BTC",
+        sellerToken,
+    );
+
+    logResponse(
+        "MARKET SELLER BTC BALANCE",
+        sellerBTC,
+    );
+
+    assert(
+        sellerBTC.status === 200,
+        "Could not retrieve market seller BTC balance",
+    );
+
+    assert(
+        Number(sellerBTC.body.available) === 0,
+        `Seller available BTC should be 0 but is ${sellerBTC.body.available}`,
+    );
+
+    assert(
+        Number(sellerBTC.body.locked) === 0.5,
+        `Seller locked BTC should be 0.5 but is ${sellerBTC.body.locked}`,
+    );
+
+    console.log(
+        "\n✅ Seller BTC settlement correct",
+    );
+
+    /*
+     * Verify seller USDT balance.
+     */
+
+    const sellerUSDT = await getBalance(
+        seller.id,
+        "USDT",
+        sellerToken,
+    );
+
+    logResponse(
+        "MARKET SELLER USDT BALANCE",
+        sellerUSDT,
+    );
+
+    assert(
+        sellerUSDT.status === 200,
+        "Could not retrieve market seller USDT balance",
+    );
+
+    assert(
+        Number(sellerUSDT.body.available) === 50,
+        `Seller available USDT should be 50 but is ${sellerUSDT.body.available}`,
+    );
+
+    console.log(
+        "\n✅ Seller USDT settlement correct",
+    );
+
+    console.log("\n========================================");
+    console.log("       ✅ MARKET BUY TEST PASSED");
+    console.log("========================================");
+}
+
 async function main() {
     console.log("========================================");
     console.log("       CEX V2 COMPLETE API TEST");
@@ -569,10 +955,6 @@ async function main() {
      * -------------------------------------
      * 8. CREATE ISOLATED BUY ORDER
      * -------------------------------------
-     *
-     * No userId is sent here.
-     *
-     * The backend gets userId from JWT.
      */
 
     console.log("\n8. Creating isolated BUY order...");
@@ -620,9 +1002,11 @@ async function main() {
         tokenA,
         ["OPEN", "PARTIALLY_FILLED", "FILLED"],
     );
+
     if (buyOrder === null) {
-    throw new Error("❌ BUY order never reached the database");
-}
+        throw new Error("❌ BUY order never reached the database");
+    }
+
     assert(
         buyOrder !== null,
         "BUY order never reached the database",
@@ -632,7 +1016,6 @@ async function main() {
         buyOrder.status === "OPEN",
         `BUY order did not reach OPEN. Current status: ${buyOrder.status}`,
     );
-    
 
     console.log(
         "\n✅ BUY order reached database",
@@ -767,19 +1150,34 @@ async function main() {
         tokenB,
         ["FILLED", "PARTIALLY_FILLED"],
     );
-    const buyCheck = await getOrder(buyOrderId, tokenA);
-    const sellCheck = await getOrder(sellOrderId, tokenB);
+
+    const buyCheck = await getOrder(
+        buyOrderId,
+        tokenA,
+    );
+
+    const sellCheck = await getOrder(
+        sellOrderId,
+        tokenB,
+    );
 
     console.log("\n=== AFTER MATCH DEBUG ===");
-    console.log("BUY:", JSON.stringify(buyCheck.body, null, 2));
-    console.log("SELL:", JSON.stringify(sellCheck.body, null, 2));
+    console.log(
+        "BUY:",
+        JSON.stringify(buyCheck.body, null, 2),
+    );
+    console.log(
+        "SELL:",
+        JSON.stringify(sellCheck.body, null, 2),
+    );
+
     if (sellAfterMatch === null) {
-    throw new Error("❌ SELL order disappeared after matching");
-}
+        throw new Error("❌ SELL order disappeared after matching");
+    }
 
     assert(
-    sellAfterMatch !== null,
-    "SELL order disappeared after matching",
+        sellAfterMatch !== null,
+        "SELL order disappeared after matching",
     );
 
     assert(
@@ -791,9 +1189,11 @@ async function main() {
         !!sellAfterMatch,
         "SELL order did not reach a matching status",
     );
+
     if (buyAfterMatch === null) {
         throw new Error("❌ BUY order disappeared after matching");
     }
+
     console.log(
         "\nBUY status:",
         buyAfterMatch.status,
@@ -803,7 +1203,6 @@ async function main() {
         "SELL status:",
         sellAfterMatch.status,
     );
-    
 
     /*
      * -------------------------------------
@@ -995,12 +1394,20 @@ async function main() {
 
     /*
      * -------------------------------------
-     * 20. INVALID JWT
+     * 20. MARKET BUY
+     * -------------------------------------
+     */
+
+    await testMarketBuy();
+
+    /*
+     * -------------------------------------
+     * 21. INVALID JWT
      * -------------------------------------
      */
 
     console.log(
-        "\n20. Testing invalid JWT...",
+        "\n21. Testing invalid JWT...",
     );
 
     const invalidToken = await request(
@@ -1027,10 +1434,18 @@ async function main() {
 
     /*
      * -------------------------------------
+     * REDIS CONSUMER RECOVERY
+     * -------------------------------------
+     */
+
+    await testRedisConsumerRecovery(tokenA);
+
+    /*
+     * -------------------------------------
      * COMPLETE
      * -------------------------------------
      */
-    await testRedisConsumerRecovery(tokenA);
+
     console.log("\n========================================");
     console.log("       ✅ ALL TESTS PASSED");
     console.log("========================================");
@@ -1053,9 +1468,11 @@ async function main() {
     console.log("✅ Unmatched order");
     console.log("✅ Order cancellation");
     console.log("✅ Funds unlocking");
+    console.log("✅ MARKET BUY");
     console.log("✅ Invalid JWT rejection");
+    console.log("✅ Redis consumer recovery");
 
-    console.log("\nCEX V2 API + AUTH TEST COMPLETE.");
+    console.log("\nCEX V2 API + AUTH + MARKET BUY TEST COMPLETE.");
 }
 
 main().catch((error) => {

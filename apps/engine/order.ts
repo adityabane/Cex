@@ -1,9 +1,9 @@
 import type { Asset, Account} from "./accounts.ts";
 import {prisma} from "./db.ts";
-import {lockBalance} from "./balance.ts";
+import {getBalance,lockBalance} from "./balance.ts";
 import {BalanceLock} from "./accounts.ts";
 export type OrderSide = "BUY" | "SELL" ;
-export type OrderStatus =  "OPEN" | "PARTIALLY_FILLED" | "FILLED";
+export type OrderStatus =  "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "CANCELLED";
 export type OrderType = "LIMIT"  | "MARKET";
 export type Order = {
     id:string;
@@ -61,6 +61,20 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
                 : "BTC";
 
         await lockBalance(userId, assetToLock, requiredAmount);
+    }
+    if(type ==="MARKET" && side==="BUY"){
+        const balance = await getBalance(userId, "USDT");
+        if (!balance) {
+            throw new Error("Balance not found for USDT");
+        }
+        if (balance.available.lte(0)) {
+            throw new Error("Insufficient USDT balance");
+        }
+        await lockBalance(
+            userId,
+            "USDT",
+            balance.available.toNumber(),
+        );
     }
     return prisma.order.create({
         data:{

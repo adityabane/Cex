@@ -3,6 +3,7 @@ import {publishTradeEvent} from "./redis-market-data";
 import { matchOrders } from "./matcher";
 import { getBestAsk,getBestBid } from "./orderbook-db";
 import { publishOrderStatusEvent } from "./redis-order-status";
+import { unlockBalance } from "./balance";
 export async function matchBuyOrder(buyOrderId: string) {
     const buyOrder = await prisma.order.findUnique({
         where: {
@@ -34,20 +35,25 @@ export async function matchBuyOrder(buyOrderId: string) {
         ) {
             break;
         }
-        // Only LIMIT BUY for now
-        if (currentBuy.price === null) {
-            break;
-        }
         const bestAsk = await getBestAsk("BTC");
+
         if (!bestAsk) {
             break;
         }
+
         if (bestAsk.price === null) {
             break;
         }
-        // BUY price must be >= SELL price
-        if (currentBuy.price.lt(bestAsk.price)) {
-            break;
+
+        if (currentBuy.type === "LIMIT") {
+            if (currentBuy.price === null) {
+                break;
+            }
+
+            // LIMIT BUY price must be >= SELL price
+            if (currentBuy.price.lt(bestAsk.price)) {
+                break;
+            }
         }
         console.log(
             `Matching BUY ${currentBuy.id} with SELL ${bestAsk.id}`
@@ -89,6 +95,45 @@ export async function matchBuyOrder(buyOrderId: string) {
             price:Number(trade.price),
             quantity:Number(trade.quantity),
         });
+    }
+        if (buyOrder.type === "MARKET") {
+        const finalBuy = await prisma.order.findUnique({
+            where: {
+                id: buyOrderId,
+            },
+        });
+
+        if (!finalBuy) {
+            throw new Error("Buy order not found");
+        }
+
+        if (finalBuy.remainingQty.gt(0)) {
+            await prisma.order.update({
+                where: {
+                    id: finalBuy.id,
+                },
+                data: {
+                    status: "CANCELLED",
+                },
+            });
+        }
+
+        const balance = await prisma.balance.findUnique({
+            where: {
+                userId_asset: {
+                    userId: finalBuy.userId,
+                    asset: "USDT",
+                },
+            },
+        });
+
+        if (balance && balance.locked.gt(0)) {
+            await unlockBalance(
+                finalBuy.userId,
+                "USDT",
+                Number(balance.locked),
+            );
+        }
     }
     return prisma.order.findUnique({
         where: {

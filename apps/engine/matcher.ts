@@ -31,17 +31,49 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
         ) {
             throw new Error("Orders must be OPEN or PARTIALLY_FILLED");
         }
-        if (
-            buyOrder.price === null ||
-            sellOrder.price === null
-        ) {
-            throw new Error("Both orders must have a price");
+        if (sellOrder.price === null) {
+            throw new Error("Sell order must have a price");
         }
-        if (buyOrder.price.lt(sellOrder.price)) {
-            throw new Error("Orders cannot be matched");
+
+        if (buyOrder.type === "LIMIT") {
+            if (buyOrder.price === null) {
+                throw new Error("Limit buy order must have a price");
+            }
+
+            if (buyOrder.price.lt(sellOrder.price)) {
+                throw new Error("Orders cannot be matched");
+            }
         }
-        const quantity = buyOrder.remainingQty.lt(sellOrder.remainingQty)?buyOrder.remainingQty:sellOrder.remainingQty;
+        let quantity = buyOrder.remainingQty.lt(sellOrder.remainingQty)
+            ? buyOrder.remainingQty
+            : sellOrder.remainingQty;
+
         const tradePrice = sellOrder.price;
+
+        if (buyOrder.type === "MARKET") {
+            const buyerBalance = await tx.balance.findUnique({
+                where: {
+                    userId_asset: {
+                        userId: buyOrder.userId,
+                        asset: "USDT",
+                    },
+                },
+            });
+
+            if (!buyerBalance) {
+                throw new Error("Buyer USDT balance not found");
+            }
+
+            const affordableQuantity = buyerBalance.locked.div(tradePrice);
+
+            if (affordableQuantity.lte(0)) {
+                throw new Error("Insufficient USDT for market order");
+            }
+
+            if (affordableQuantity.lt(quantity)) {
+                quantity = affordableQuantity;
+            }
+        }
         const trade = await tx.trade.create({
             data:{
                 buyOrderId:buyOrder.id,
@@ -80,8 +112,17 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
             },
         });
         const tradeValue = quantity.mul(tradePrice);
-        const reservedValue = quantity.mul(buyOrder.price);
-        const refund = reservedValue.sub(tradeValue);
+
+        const reservedValue =
+            buyOrder.type === "MARKET"
+                ? tradeValue
+                : quantity.mul(buyOrder.price!);
+
+        const refund =
+            buyOrder.type === "MARKET"
+                ? 0
+                : reservedValue.sub(tradeValue);
+
         await tx.balance.update({
             where:{
                 userId_asset:{
