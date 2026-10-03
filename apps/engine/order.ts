@@ -76,6 +76,23 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
             balance.available.toNumber(),
         );
     }
+    if (type === "MARKET" && side === "SELL") {
+        const balance = await getBalance(userId, "BTC");
+
+        if (!balance) {
+            throw new Error("Balance not found for BTC");
+        }
+
+        if (balance.available.lte(0)) {
+            throw new Error("Insufficient BTC balance");
+        }
+
+        await lockBalance(
+            userId,
+            "BTC",
+            balance.available.toNumber(),
+        );
+    }
     return prisma.order.create({
         data:{
             id,

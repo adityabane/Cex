@@ -32,7 +32,7 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
             throw new Error("Orders must be OPEN or PARTIALLY_FILLED");
         }
         if (sellOrder.price === null) {
-            throw new Error("Sell order must have a price");
+            throw new Error("Limit Sell order must have a price");
         }
 
         if (buyOrder.type === "LIMIT") {
@@ -48,8 +48,10 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
             ? buyOrder.remainingQty
             : sellOrder.remainingQty;
 
-        const tradePrice = sellOrder.price;
-
+        const tradePrice = sellOrder.type==="MARKET"?buyOrder.price:sellOrder.price;
+        if(tradePrice===null){
+            throw new Error("Trade price not available");
+        }
         if (buyOrder.type === "MARKET") {
             const buyerBalance = await tx.balance.findUnique({
                 where: {

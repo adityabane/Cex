@@ -174,9 +174,9 @@ export async function matchSellOrder(sellOrderId: string,createdAfter?:Date) {
             break;
         }
 
-        if (currentSell.price === null) {
-            break;
-        }
+        // if (currentSell.price === null) {
+        //     break;
+        // }
 
         const bestBid = await getBestBid("BTC",createdAfter);
 
@@ -189,8 +189,13 @@ export async function matchSellOrder(sellOrderId: string,createdAfter?:Date) {
         }
 
         // SELL price must be <= BUY price
-        if (currentSell.price.gt(bestBid.price)) {
-            break;
+        if(currentSell.type === "LIMIT"){
+            if(currentSell.price===null){
+                break;
+            }
+            if (currentSell.price.gt(bestBid.price)) {
+                break;
+            }
         }
 
         console.log(
@@ -236,7 +241,34 @@ export async function matchSellOrder(sellOrderId: string,createdAfter?:Date) {
             quantity: Number(trade.quantity),
         });
     }
+    if (sellOrder.type === "MARKET") {
+        const finalSell = await prisma.order.findUnique({
+            where: {
+                id: sellOrderId,
+            },
+        });
 
+        if (!finalSell) {
+            throw new Error("Sell order not found");
+        }
+
+        if (finalSell.remainingQty.gt(0)) {
+            await unlockBalance(
+                finalSell.userId,
+                "BTC",
+                Number(finalSell.remainingQty),
+            );
+
+            await prisma.order.update({
+                where: {
+                    id: finalSell.id,
+                },
+                data: {
+                    status: "CANCELLED",
+                },
+            });
+        }
+    }
     return prisma.order.findUnique({
         where: {
             id: sellOrderId,

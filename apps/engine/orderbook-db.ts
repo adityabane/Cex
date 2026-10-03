@@ -39,6 +39,7 @@ export async function getBestBid(
         where: {
             asset,
             side: "BUY",
+            type:"LIMIT",
             status: {
                 in: ["OPEN", "PARTIALLY_FILLED"],
             },
