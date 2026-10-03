@@ -23,9 +23,14 @@ async function createUser() {
         }),
     });
 
-    assert(response.ok, `Failed to create user: ${await response.text()}`);
+    const responseText = await response.text();
 
-    const user:any = await response.json();
+    assert(
+        response.ok,
+        `Failed to create user: ${responseText}`
+    );
+
+    const user: any = JSON.parse(responseText);
 
     const loginResponse = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
@@ -38,12 +43,14 @@ async function createUser() {
         }),
     });
 
+    const loginText = await loginResponse.text();
+
     assert(
         loginResponse.ok,
-        `Failed to login user: ${await loginResponse.text()}`
+        `Failed to login user: ${loginText}`
     );
 
-    const loginData:any = await loginResponse.json();
+    const loginData: any = JSON.parse(loginText);
 
     return {
         id: user.id as string,
@@ -72,9 +79,11 @@ async function createBalance(
         }
     );
 
+    const responseText = await response.text();
+
     assert(
         response.ok,
-        `Failed to create ${asset} balance: ${await response.text()}`
+        `Failed to create ${asset} balance: ${responseText}`
     );
 }
 
@@ -348,12 +357,14 @@ async function testAuthenticatedWebSocket() {
             }),
         });
 
+        const orderText = await orderResponse.text();
+
         assert(
             orderResponse.status === 201,
-            `Failed to create order: ${await orderResponse.text()}`
+            `Failed to create order: ${orderText}`
         );
 
-        const orderData:any = await orderResponse.json();
+        const orderData: any = JSON.parse(orderText);
 
         console.log(`   Order created: ${orderData.orderId}`);
 

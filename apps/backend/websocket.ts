@@ -78,6 +78,77 @@ function fieldsToObject(fields: string[]) {
     return event;
 }
 
+async function recoverPendingMessages() {
+    let startId = "0-0";
+
+    while (true) {
+        const result = await redis.xautoclaim(
+            MARKET_DATA_STREAM,
+            CONSUMER_GROUP,
+            CONSUMER_NAME,
+            60000,
+            startId,
+            "COUNT",
+            10,
+        );
+
+        const nextId = result[0] as string;
+        const messages = result[1] as RedisMessage[];
+
+        if (messages.length === 0) {
+            break;
+        }
+
+        for (const [messageId, fields] of messages) {
+            const event = fieldsToObject(fields);
+
+            console.log(
+                "Recovered pending market event:",
+                messageId,
+                event,
+            );
+
+            for (const [client, state] of clients) {
+                const subscriptions = state.subscriptions;
+
+                if (
+                    event.type === "DEPTH" &&
+                    subscriptions.has(
+                        `depth.${event.asset}`,
+                    )
+                ) {
+                    client.send(
+                        JSON.stringify(event),
+                    );
+                }
+
+                if (
+                    event.type === "ORDER_STATUS" &&
+                    subscriptions.has(
+                        `orders.${event.userId}`,
+                    )
+                ) {
+                    client.send(
+                        JSON.stringify(event),
+                    );
+                }
+            }
+
+            await redis.xack(
+                MARKET_DATA_STREAM,
+                CONSUMER_GROUP,
+                messageId,
+            );
+        }
+
+        if (nextId === startId) {
+            break;
+        }
+
+        startId = nextId;
+    }
+}
+
 async function consumeMarketData() {
     console.log(
         "Redis market-data consumer started...",
@@ -91,7 +162,7 @@ async function consumeMarketData() {
 
             continue;
         }
-
+        await recoverPendingMessages();
         try {
             const result =
                 (await redis.xreadgroup(
