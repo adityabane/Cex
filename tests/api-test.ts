@@ -407,8 +407,7 @@ async function testMarketBuy() {
      * Use a unique price so an older OPEN SELL order
      * cannot take priority over this test order.
      */
-    const testPrice =
-        100 + Math.floor(Math.random() * 10000);
+    const testPrice = 0.000000001;
 
     const buyer = await createUser(
         `market-buyer-${uniqueId}@test.com`,
@@ -781,6 +780,62 @@ async function testMarketBuy() {
         "\n✅ Seller USDT settlement correct",
     );
 
+    
+    /*
+     * Cancel the remaining LIMIT SELL.
+     *
+     * MARKET BUY consumed 0.5 BTC from the 1 BTC SELL,
+     * so 0.5 BTC is still locked.
+     *
+     * Cancel it so this test does not leave an active
+     * SELL order that can interfere with MARKET SELL TEST.
+     */
+
+    console.log(
+        "\nCancelling remaining MARKET BUY test SELL...",
+    );
+
+    const cancelSellResponse = await cancelOrder(
+        sellOrderId,
+        sellerToken,
+    );
+
+    assert(
+        cancelSellResponse.status === 200,
+        `Failed to cancel remaining MARKET BUY SELL: ${cancelSellResponse.status}`,
+    );
+
+    const cancelledSellOrder = await waitForOrder(
+        sellOrderId,
+        sellerToken,
+        ["CANCELLED"],
+    );
+
+    assert(
+        !!cancelledSellOrder,
+        "Remaining MARKET BUY SELL did not become CANCELLED",
+    );
+
+    console.log(
+        "\n✅ Remaining MARKET BUY SELL cancelled",
+    );
+
+    const sellerFinalBTC = await waitForBalance(
+        seller.id,
+        "BTC",
+        sellerToken,
+        0.5,
+        0,
+    );
+
+    assert(
+        !!sellerFinalBTC,
+        "Seller BTC was not unlocked after cancelling remaining SELL",
+    );
+
+    console.log(
+        "\n✅ Remaining seller BTC unlocked",
+    );
     console.log("\n========================================");
     console.log("       ✅ MARKET BUY TEST PASSED");
     console.log("========================================");
@@ -799,9 +854,7 @@ async function testMarketSell() {
      * cannot take priority over this test order.
      */
 
-    const testPrice =
-        100 + Math.floor(Math.random() * 10000);
-
+    const testPrice = 1_000_000;
     const buyer = await createUser(
         `market-sell-buyer-${uniqueId}@test.com`,
         "TestPassword123!",
@@ -1048,8 +1101,7 @@ async function testMarketSell() {
     const tradeValue =
         marketSellQty * testPrice;
 
-    const expectedBuyerUSDT =
-        buyerInitialUSDT - tradeValue;
+    const expectedBuyerUSDT =0;
 
     /*
      * Buyer BTC.

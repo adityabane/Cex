@@ -51,7 +51,6 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
         let quantity = buyOrder.remainingQty.lt(sellOrder.remainingQty)
             ? buyOrder.remainingQty
             : sellOrder.remainingQty;
-
         const tradePrice = sellOrder.type==="MARKET"?buyOrder.price:sellOrder.price;
         if(tradePrice===null){
             throw new Error("Trade price not available");
