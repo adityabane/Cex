@@ -57,7 +57,7 @@ if (
             ? "USDT"
             : "BTC";
 }
-
+    await unlockBalance(userId,assetToUnlock,unlockAmount);
     return prisma.order.update({
         where: {
             id: orderId,
