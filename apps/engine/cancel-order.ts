@@ -30,21 +30,33 @@ export async function cancelOrder(
         throw new Error("Order has no remaining quantity");
     }
 
-    const unlockAmount =
+    let unlockAmount: number;
+let assetToUnlock: string;
+
+if (
+    order.type === "MARKET" &&
+    order.side === "BUY"
+) {
+    if (
+        order.marketBuyReservedUSDT === null ||
+        order.marketBuyReservedUSDT.lte(0)
+    ) {
+        throw new Error("Market BUY has no reserved USDT");
+    }
+
+    unlockAmount = Number(order.marketBuyReservedUSDT);
+    assetToUnlock = "USDT";
+} else {
+    unlockAmount =
         order.side === "BUY"
             ? Number(order.remainingQty) * Number(order.price)
             : Number(order.remainingQty);
 
-    const assetToUnlock =
+    assetToUnlock =
         order.side === "BUY"
             ? "USDT"
             : "BTC";
-
-    await unlockBalance(
-        userId,
-        assetToUnlock,
-        unlockAmount,
-    );
+}
 
     return prisma.order.update({
         where: {
@@ -52,6 +64,7 @@ export async function cancelOrder(
         },
         data: {
             status: "CANCELLED",
+            marketBuyReservedUSDT :null,
         },
     });
 }

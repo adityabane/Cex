@@ -55,30 +55,6 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
         if(tradePrice===null){
             throw new Error("Trade price not available");
         }
-        if (buyOrder.type === "MARKET") {
-            const buyerBalance = await tx.balance.findUnique({
-                where: {
-                    userId_asset: {
-                        userId: buyOrder.userId,
-                        asset: "USDT",
-                    },
-                },
-            });
-
-            if (!buyerBalance) {
-                throw new Error("Buyer USDT balance not found");
-            }
-
-            const affordableQuantity = buyerBalance.locked.div(tradePrice);
-
-            if (affordableQuantity.lte(0)) {
-                throw new Error("Insufficient USDT for market order");
-            }
-
-            if (affordableQuantity.lt(quantity)) {
-                quantity = affordableQuantity;
-            }
-        }
         const trade = await tx.trade.create({
             data:{
                 buyOrderId:buyOrder.id,
@@ -117,7 +93,30 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
             },
         });
         const tradeValue = quantity.mul(tradePrice);
+        if (buyOrder.type === "MARKET") {
+            if (
+                buyOrder.marketBuyReservedUSDT === null
+            ) {
+                throw new Error("Market BUY has no reserved USDT");
+            }
 
+            if (
+                buyOrder.marketBuyReservedUSDT.lt(tradeValue)
+            ) {
+                throw new Error("Market BUY reservation exceeded");
+            }
+
+            await tx.order.update({
+                where: {
+                    id: buyOrder.id,
+                },
+                data: {
+                    marketBuyReservedUSDT: {
+                        decrement: tradeValue,
+                    },
+                },
+            });
+        }
         const reservedValue =
             buyOrder.type === "MARKET"
                 ? tradeValue

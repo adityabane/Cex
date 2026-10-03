@@ -107,33 +107,29 @@ export async function matchBuyOrder(buyOrderId: string) {
             throw new Error("Buy order not found");
         }
 
-        if (finalBuy.remainingQty.gt(0)) {
-            await prisma.order.update({
-                where: {
-                    id: finalBuy.id,
-                },
-                data: {
-                    status: "CANCELLED",
-                },
-            });
-        }
-
-        const balance = await prisma.balance.findUnique({
-            where: {
-                userId_asset: {
-                    userId: finalBuy.userId,
-                    asset: "USDT",
-                },
-            },
-        });
-
-        if (balance && balance.locked.gt(0)) {
+        if (
+            finalBuy.marketBuyReservedUSDT !== null &&
+            finalBuy.marketBuyReservedUSDT.gt(0)
+        ) {
             await unlockBalance(
                 finalBuy.userId,
                 "USDT",
-                Number(balance.locked),
+                Number(finalBuy.marketBuyReservedUSDT),
             );
         }
+
+        await prisma.order.update({
+            where: {
+                id: finalBuy.id,
+            },
+            data: {
+                status:
+                    finalBuy.remainingQty.gt(0)
+                        ? "CANCELLED"
+                        : "FILLED",
+                marketBuyReservedUSDT: null,
+            },
+        });
     }
     return prisma.order.findUnique({
         where: {

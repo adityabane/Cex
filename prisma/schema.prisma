@@ -38,6 +38,7 @@ model Order {
   quantity     Decimal  @db.Decimal(30, 10)
   remainingQty Decimal  @db.Decimal(30, 10)
   price        Decimal? @db.Decimal(30, 10)
+  marketBuyReservedUSDT   Decimal? @db.Decimal(30,10)
   status       String
   createdAt    DateTime @default(now())
   user         User     @relation(fields: [userId], references: [id])

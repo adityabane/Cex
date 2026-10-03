@@ -62,3 +62,65 @@ export async function getBestBid(
         ],
     });
 }
+
+export async function calculateMarketBuyRequiredUSDT(
+    asset: string,
+    quantity: number,
+): Promise<number> {
+    let remainingQty = quantity;
+    let requiredUSDT = 0;
+
+    const asks = await prisma.order.findMany({
+        where: {
+            asset,
+            side: "SELL",
+            type: "LIMIT",
+            status: {
+                in: ["OPEN", "PARTIALLY_FILLED"],
+            },
+            remainingQty: {
+                gt: 0,
+            },
+            price: {
+                not: null,
+            },
+        },
+        orderBy: [
+            {
+                price: "asc",
+            },
+            {
+                createdAt: "asc",
+            },
+        ],
+    });
+
+    for (const ask of asks) {
+        if (remainingQty <= 0) {
+            break;
+        }
+
+        if (ask.price === null) {
+            continue;
+        }
+
+        const availableQty = Number(ask.remainingQty);
+        const executableQty = Math.min(
+            remainingQty,
+            availableQty,
+        );
+
+        requiredUSDT +=
+            executableQty * Number(ask.price);
+
+        remainingQty -= executableQty;
+    }
+
+    if (remainingQty > 0) {
+        throw new Error(
+            "Insufficient market liquidity",
+        );
+    }
+
+    return requiredUSDT;
+}

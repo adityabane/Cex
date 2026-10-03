@@ -2,6 +2,7 @@ import type { Asset, Account} from "./accounts.ts";
 import {prisma} from "./db.ts";
 import {getBalance,lockBalance} from "./balance.ts";
 import {BalanceLock} from "./accounts.ts";
+import {calculateMarketBuyRequiredUSDT} from "./orderbook-db.ts";
 export type OrderSide = "BUY" | "SELL" ;
 export type OrderStatus =  "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "CANCELLED";
 export type OrderType = "LIMIT"  | "MARKET";
@@ -33,6 +34,7 @@ export async function saveOrder(order:Order){
     
 }
 export async function createOrderInDb(id:string,userId:string,side:OrderSide,type:OrderType,qty:number,price?:number) {
+    let marketBuyReservedUSDT: number | undefined;
     const order:Order={
         id,
         userId,
@@ -70,10 +72,19 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
         if (balance.available.lte(0)) {
             throw new Error("Insufficient USDT balance");
         }
+        const requiredUSDT = await calculateMarketBuyRequiredUSDT(
+            "BTC",
+            qty,
+        );
+
+        if (balance.available.lt(requiredUSDT)) {
+            throw new Error("Insufficient USDT balance");
+        }
+        marketBuyReservedUSDT = requiredUSDT
         await lockBalance(
             userId,
             "USDT",
-            balance.available.toNumber(),
+            requiredUSDT,
         );
     }
     if (type === "MARKET" && side === "SELL") {
@@ -103,6 +114,7 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
             quantity: qty,
             remainingQty: qty,
             price,
+            marketBuyReservedUSDT,
             status: "OPEN",
         },
     });

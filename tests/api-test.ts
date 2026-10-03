@@ -404,10 +404,10 @@ async function testMarketBuy() {
         `${Date.now()}-market-buy-${crypto.randomUUID()}`;
 
     /*
-     * Use a unique price so an older OPEN SELL order
-     * cannot take priority over this test order.
+     * Use a unique realistic BTC price so an older OPEN SELL
+     * order cannot take priority over this test order.
      */
-    const testPrice = 0.000000001;
+    const testPrice = 900000 + (Date.now() % 1000);
 
     const buyer = await createUser(
         `market-buyer-${uniqueId}@test.com`,
@@ -525,6 +525,92 @@ async function testMarketBuy() {
 
     console.log(
         "\n✅ LIMIT SELL is OPEN",
+    );
+
+    /*
+     * Create an existing LIMIT BUY for the SAME buyer.
+     *
+     * This is important.
+     *
+     * The buyer will already have 100 USDT locked
+     * when the MARKET BUY is created.
+     *
+     * This verifies that the MARKET BUY only uses
+     * its own reservation and does not use/unlock
+     * USDT belonging to another order.
+     */
+
+    const reservedLimitBuyPrice = 100;
+
+    console.log(
+        "\nCreating existing LIMIT BUY for reservation isolation test...",
+    );
+
+    const existingLimitBuy = await createOrder(
+        {
+            side: "BUY",
+            type: "LIMIT",
+            qty: 1,
+            price: reservedLimitBuyPrice,
+        },
+        buyerToken,
+    );
+
+    assert(
+        existingLimitBuy.status === 201,
+        `Existing LIMIT BUY creation failed: ${existingLimitBuy.status}`,
+    );
+
+    const existingLimitBuyId =
+        existingLimitBuy.body.orderId;
+
+    assert(
+        !!existingLimitBuyId,
+        "Existing LIMIT BUY order ID missing",
+    );
+
+    console.log(
+        "\nExisting LIMIT BUY:",
+        existingLimitBuyId,
+    );
+
+    const existingLimitOrder = await waitForOrder(
+        existingLimitBuyId,
+        buyerToken,
+        ["OPEN"],
+    );
+
+    assert(
+        !!existingLimitOrder,
+        "Existing LIMIT BUY did not reach OPEN",
+    );
+
+    console.log(
+        "\n✅ Existing LIMIT BUY is OPEN",
+    );
+
+    /*
+     * Verify that the existing LIMIT BUY locked
+     * exactly 100 USDT.
+     */
+
+    const balanceBeforeMarketBuy =
+        await waitForBalance(
+            buyer.id,
+            "USDT",
+            buyerToken,
+            buyerInitialUSDT -
+                reservedLimitBuyPrice,
+            reservedLimitBuyPrice,
+        );
+
+    assert(
+        !!balanceBeforeMarketBuy,
+        "Existing LIMIT BUY did not lock the expected USDT",
+    );
+
+    console.log(
+        "\n✅ Existing LIMIT BUY reservation confirmed",
     );
 
     /*
@@ -647,19 +733,44 @@ async function testMarketBuy() {
     const tradeValue =
         marketBuyQty * testPrice;
 
-    const expectedBuyerUSDT =
-        buyerInitialUSDT - tradeValue;
+    /*
+     * The buyer had 100 USDT already locked
+     * for the existing LIMIT BUY.
+     *
+     * Therefore after MARKET BUY:
+     *
+     * available =
+     * initial balance
+     * - existing LIMIT BUY reservation
+     * - MARKET BUY trade value
+     *
+     * locked =
+     * existing LIMIT BUY reservation
+     */
+
+    const expectedBuyerAvailable =
+        buyerInitialUSDT -
+        reservedLimitBuyPrice -
+        tradeValue;
+
+    const expectedBuyerLocked =
+        reservedLimitBuyPrice;
 
     /*
      * Verify buyer USDT balance.
+     *
+     * IMPORTANT:
+     *
+     * We expect the existing LIMIT BUY's
+     * 100 USDT to remain locked.
      */
 
     const buyerUSDT = await waitForBalance(
         buyer.id,
         "USDT",
         buyerToken,
-        expectedBuyerUSDT,
-        0,
+        expectedBuyerAvailable,
+        expectedBuyerLocked,
     );
 
     assert(
@@ -673,17 +784,23 @@ async function testMarketBuy() {
     );
 
     assert(
-        Number(buyerUSDT.available) === expectedBuyerUSDT,
-        `Buyer available USDT should be ${expectedBuyerUSDT} but is ${buyerUSDT.available}`,
+        Number(buyerUSDT.available) ===
+            expectedBuyerAvailable,
+        `Buyer available USDT should be ${expectedBuyerAvailable} but is ${buyerUSDT.available}`,
     );
 
     assert(
-        Number(buyerUSDT.locked) === 0,
-        `Buyer locked USDT should be 0 but is ${buyerUSDT.locked}`,
+        Number(buyerUSDT.locked) ===
+            expectedBuyerLocked,
+        `Buyer locked USDT should be ${expectedBuyerLocked} but is ${buyerUSDT.locked}`,
     );
 
     console.log(
         "\n✅ Buyer USDT settlement correct",
+    );
+
+    console.log(
+        "\n✅ Existing LIMIT BUY reservation remained isolated",
     );
 
     /*
@@ -780,7 +897,94 @@ async function testMarketBuy() {
         "\n✅ Seller USDT settlement correct",
     );
 
-    
+    /*
+     * Cancel the existing LIMIT BUY.
+     *
+     * This verifies that the 100 USDT reservation
+     * belonging to the LIMIT BUY can still be
+     * unlocked independently after the MARKET BUY
+     * has already completed.
+     */
+
+    console.log(
+        "\nCancelling existing LIMIT BUY...",
+    );
+
+    const cancelExistingLimitBuy =
+        await cancelOrder(
+            existingLimitBuyId,
+            buyerToken,
+        );
+
+    assert(
+        cancelExistingLimitBuy.status === 200,
+        `Failed to cancel existing LIMIT BUY: ${cancelExistingLimitBuy.status}`,
+    );
+
+    const cancelledExistingLimitBuy =
+        await waitForOrder(
+            existingLimitBuyId,
+            buyerToken,
+            ["CANCELLED"],
+        );
+
+    assert(
+        !!cancelledExistingLimitBuy,
+        "Existing LIMIT BUY did not become CANCELLED",
+    );
+
+    console.log(
+        "\n✅ Existing LIMIT BUY cancelled",
+    );
+
+    /*
+     * After cancelling the existing LIMIT BUY,
+     * its 100 USDT should be unlocked.
+     *
+     * Therefore:
+     *
+     * available = initial - MARKET BUY trade value
+     * locked = 0
+     */
+
+    const buyerFinalUSDT =
+        await waitForBalance(
+            buyer.id,
+            "USDT",
+            buyerToken,
+            buyerInitialUSDT - tradeValue,
+            0,
+        );
+
+    assert(
+        !!buyerFinalUSDT,
+        "Buyer USDT did not settle correctly after cancelling existing LIMIT BUY",
+    );
+
+    console.log(
+        "\nFINAL MARKET BUYER USDT BALANCE:",
+        JSON.stringify(
+            buyerFinalUSDT,
+            null,
+            2,
+        ),
+    );
+
+    assert(
+        Number(buyerFinalUSDT.available) ===
+            buyerInitialUSDT - tradeValue,
+        `Final buyer available USDT should be ${buyerInitialUSDT - tradeValue} but is ${buyerFinalUSDT.available}`,
+    );
+
+    assert(
+        Number(buyerFinalUSDT.locked) === 0,
+        `Final buyer locked USDT should be 0 but is ${buyerFinalUSDT.locked}`,
+    );
+
+    console.log(
+        "\n✅ Existing LIMIT BUY funds unlocked correctly",
+    );
+
     /*
      * Cancel the remaining LIMIT SELL.
      *
@@ -836,6 +1040,7 @@ async function testMarketBuy() {
     console.log(
         "\n✅ Remaining seller BTC unlocked",
     );
+
     console.log("\n========================================");
     console.log("       ✅ MARKET BUY TEST PASSED");
     console.log("========================================");
