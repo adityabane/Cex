@@ -31,7 +31,7 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
         ) {
             throw new Error("Orders must be OPEN or PARTIALLY_FILLED");
         }
-        if (sellOrder.price === null) {
+        if (sellOrder.type==="LIMIT" && sellOrder.price === null) {
             throw new Error("Limit Sell order must have a price");
         }
 
@@ -40,7 +40,11 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
                 throw new Error("Limit buy order must have a price");
             }
 
-            if (buyOrder.price.lt(sellOrder.price)) {
+            if (
+                sellOrder.type === "LIMIT" &&
+                sellOrder.price !== null &&
+                buyOrder.price.lt(sellOrder.price)
+            ) {
                 throw new Error("Orders cannot be matched");
             }
         }

@@ -83,14 +83,14 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
             throw new Error("Balance not found for BTC");
         }
 
-        if (balance.available.lte(0)) {
+        if (balance.available.lte(qty)) {
             throw new Error("Insufficient BTC balance");
         }
 
         await lockBalance(
             userId,
             "BTC",
-            balance.available.toNumber(),
+            qty,
         );
     }
     return prisma.order.create({
