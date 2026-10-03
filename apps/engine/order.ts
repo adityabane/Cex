@@ -83,7 +83,7 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
             throw new Error("Balance not found for BTC");
         }
 
-        if (balance.available.lte(qty)) {
+        if (balance.available.lt(qty)) {
             throw new Error("Insufficient BTC balance");
         }
 

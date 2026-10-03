@@ -240,6 +240,7 @@ async function cancelOrder(
 
     return response;
 }
+
 async function waitForBalance(
     userId: string,
     asset: string,
@@ -272,6 +273,7 @@ async function waitForBalance(
 
     return null;
 }
+
 async function waitForOrder(
     orderId: string,
     token: string,
@@ -399,7 +401,14 @@ async function testMarketBuy() {
      */
 
     const uniqueId =
-        `${Date.now()}-market-${crypto.randomUUID()}`;
+        `${Date.now()}-market-buy-${crypto.randomUUID()}`;
+
+    /*
+     * Use a unique price so an older OPEN SELL order
+     * cannot take priority over this test order.
+     */
+    const testPrice =
+        100 + Math.floor(Math.random() * 10000);
 
     const buyer = await createUser(
         `market-buyer-${uniqueId}@test.com`,
@@ -419,7 +428,7 @@ async function testMarketBuy() {
     /*
      * Buyer:
      *
-     * 1000 USDT
+     * 1000000 USDT
      * 0 BTC
      *
      * Seller:
@@ -428,10 +437,13 @@ async function testMarketBuy() {
      * 1 BTC
      */
 
+    const buyerInitialUSDT = 1_000_000;
+    const marketBuyQty = 0.5;
+
     await createBalance(
         buyer.id,
         "USDT",
-        1000,
+        buyerInitialUSDT,
         buyerToken,
     );
 
@@ -458,10 +470,15 @@ async function testMarketBuy() {
 
     console.log("\n✅ Market test balances created");
 
+    console.log(
+        "\nMarket BUY test price:",
+        testPrice,
+    );
+
     /*
      * Create LIMIT SELL:
      *
-     * 1 BTC @ 100 USDT
+     * 1 BTC @ unique test price
      */
 
     console.log(
@@ -473,7 +490,7 @@ async function testMarketBuy() {
             side: "SELL",
             type: "LIMIT",
             qty: 1,
-            price: 100,
+            price: testPrice,
         },
         sellerToken,
     );
@@ -527,7 +544,7 @@ async function testMarketBuy() {
         {
             side: "BUY",
             type: "MARKET",
-            qty: 0.5,
+            qty: marketBuyQty,
         },
         buyerToken,
     );
@@ -560,9 +577,11 @@ async function testMarketBuy() {
         buyerToken,
         ["FILLED", "PARTIALLY_FILLED", "CANCELLED"],
     );
-    if(marketBuyOrder===null){
-        throw new Error("marketbuyorder is null")
+
+    if (marketBuyOrder === null) {
+        throw new Error("marketbuyorder is null");
     }
+
     assert(
         !!marketBuyOrder,
         "Market BUY did not reach a final state",
@@ -596,9 +615,11 @@ async function testMarketBuy() {
         sellerToken,
         ["PARTIALLY_FILLED", "FILLED"],
     );
-    if(finalSellOrder===null){
-        throw new Error("finalsellorder is null")
+
+    if (finalSellOrder === null) {
+        throw new Error("finalsellorder is null");
     }
+
     assert(
         !!finalSellOrder,
         "SELL order did not reach matching state",
@@ -619,19 +640,27 @@ async function testMarketBuy() {
     );
 
     /*
+     * Trade value:
+     *
+     * 0.5 BTC × testPrice
+     */
+
+    const tradeValue =
+        marketBuyQty * testPrice;
+
+    const expectedBuyerUSDT =
+        buyerInitialUSDT - tradeValue;
+
+    /*
      * Verify buyer USDT balance.
-     *
-     * Trade:
-     *
-     * 0.5 BTC × 100 USDT = 50 USDT
      */
 
     const buyerUSDT = await waitForBalance(
-    buyer.id,
-    "USDT",
-    buyerToken,
-    950,
-    0,
+        buyer.id,
+        "USDT",
+        buyerToken,
+        expectedBuyerUSDT,
+        0,
     );
 
     assert(
@@ -645,16 +674,14 @@ async function testMarketBuy() {
     );
 
     assert(
-        Number(buyerUSDT.available) === 950,
-        `Buyer available USDT should be 950 but is ${buyerUSDT.available}`,
+        Number(buyerUSDT.available) === expectedBuyerUSDT,
+        `Buyer available USDT should be ${expectedBuyerUSDT} but is ${buyerUSDT.available}`,
     );
 
     assert(
         Number(buyerUSDT.locked) === 0,
         `Buyer locked USDT should be 0 but is ${buyerUSDT.locked}`,
     );
-
-
 
     console.log(
         "\n✅ Buyer USDT settlement correct",
@@ -727,25 +754,27 @@ async function testMarketBuy() {
      * Verify seller USDT balance.
      */
 
-    const sellerUSDT = await getBalance(
+    const sellerUSDT = await waitForBalance(
         seller.id,
         "USDT",
         sellerToken,
-    );
-
-    logResponse(
-        "MARKET SELLER USDT BALANCE",
-        sellerUSDT,
+        tradeValue,
+        0,
     );
 
     assert(
-        sellerUSDT.status === 200,
-        "Could not retrieve market seller USDT balance",
+        !!sellerUSDT,
+        "Seller USDT balance did not settle correctly",
+    );
+
+    console.log(
+        "\nMARKET SELLER USDT BALANCE:",
+        JSON.stringify(sellerUSDT, null, 2),
     );
 
     assert(
-        Number(sellerUSDT.body.available) === 50,
-        `Seller available USDT should be 50 but is ${sellerUSDT.body.available}`,
+        Number(sellerUSDT.available) === tradeValue,
+        `Seller available USDT should be ${tradeValue} but is ${sellerUSDT.available}`,
     );
 
     console.log(
@@ -754,6 +783,425 @@ async function testMarketBuy() {
 
     console.log("\n========================================");
     console.log("       ✅ MARKET BUY TEST PASSED");
+    console.log("========================================");
+}
+
+async function testMarketSell() {
+    console.log("\n========================================");
+    console.log("       MARKET SELL TEST");
+    console.log("========================================");
+
+    const uniqueId =
+        `${Date.now()}-market-sell-${crypto.randomUUID()}`;
+
+    /*
+     * Use a unique price so an older OPEN BUY order
+     * cannot take priority over this test order.
+     */
+
+    const testPrice =
+        100 + Math.floor(Math.random() * 10000);
+
+    const buyer = await createUser(
+        `market-sell-buyer-${uniqueId}@test.com`,
+        "TestPassword123!",
+    );
+
+    const seller = await createUser(
+        `market-sell-seller-${uniqueId}@test.com`,
+        "TestPassword123!",
+    );
+
+    const buyerToken = await login(buyer);
+    const sellerToken = await login(seller);
+
+    console.log(
+        "\n✅ Market SELL test users created",
+    );
+
+    const buyerInitialUSDT = 1_000_000;
+    const sellerInitialBTC = 1;
+    const marketSellQty = 0.5;
+
+    /*
+     * Buyer:
+     *
+     * 1000000 USDT
+     * 0 BTC
+     *
+     * Seller:
+     *
+     * 0 USDT
+     * 1 BTC
+     */
+
+    await createBalance(
+        buyer.id,
+        "USDT",
+        buyerInitialUSDT,
+        buyerToken,
+    );
+
+    await createBalance(
+        buyer.id,
+        "BTC",
+        0,
+        buyerToken,
+    );
+
+    await createBalance(
+        seller.id,
+        "USDT",
+        0,
+        sellerToken,
+    );
+
+    await createBalance(
+        seller.id,
+        "BTC",
+        sellerInitialBTC,
+        sellerToken,
+    );
+
+    console.log(
+        "\n✅ Market SELL test balances created",
+    );
+
+    console.log(
+        "\nMarket SELL test price:",
+        testPrice,
+    );
+
+    /*
+     * Create LIMIT BUY:
+     *
+     * 1 BTC @ unique test price
+     */
+
+    console.log(
+        "\nCreating LIMIT BUY for market sell...",
+    );
+
+    const buyCreate = await createOrder(
+        {
+            side: "BUY",
+            type: "LIMIT",
+            qty: 1,
+            price: testPrice,
+        },
+        buyerToken,
+    );
+
+    assert(
+        buyCreate.status === 201,
+        `Market SELL test BUY creation failed: ${buyCreate.status}`,
+    );
+
+    const buyOrderId =
+        buyCreate.body.orderId;
+
+    assert(
+        !!buyOrderId,
+        "Market SELL test BUY order ID missing",
+    );
+
+    console.log(
+        "\nMarket SELL test BUY:",
+        buyOrderId,
+    );
+
+    const buyOrder = await waitForOrder(
+        buyOrderId,
+        buyerToken,
+        ["OPEN"],
+    );
+
+    assert(
+        !!buyOrder,
+        "Market SELL test BUY did not reach OPEN",
+    );
+
+    console.log(
+        "\n✅ LIMIT BUY is OPEN",
+    );
+
+    /*
+     * Create MARKET SELL:
+     *
+     * 0.5 BTC
+     */
+
+    console.log(
+        "\nCreating MARKET SELL...",
+    );
+
+    const marketSellCreate = await createOrder(
+        {
+            side: "SELL",
+            type: "MARKET",
+            qty: marketSellQty,
+        },
+        sellerToken,
+    );
+
+    logResponse(
+        "MARKET SELL CREATE",
+        marketSellCreate,
+    );
+
+    assert(
+        marketSellCreate.status === 201,
+        `MARKET SELL creation failed: ${marketSellCreate.status}`,
+    );
+
+    const marketSellOrderId =
+        marketSellCreate.body.orderId;
+
+    assert(
+        !!marketSellOrderId,
+        "MARKET SELL order ID missing",
+    );
+
+    console.log(
+        "\nMARKET SELL:",
+        marketSellOrderId,
+    );
+
+    /*
+     * MARKET SELL should consume 0.5 BTC
+     * from the 1 BTC LIMIT BUY.
+     */
+
+    const marketSellOrder = await waitForOrder(
+        marketSellOrderId,
+        sellerToken,
+        ["FILLED", "PARTIALLY_FILLED", "CANCELLED"],
+    );
+
+    if (marketSellOrder === null) {
+        throw new Error("marketsellorder is null");
+    }
+
+    assert(
+        !!marketSellOrder,
+        "MARKET SELL did not reach a final state",
+    );
+
+    console.log(
+        "\nMARKET SELL final status:",
+        marketSellOrder.status,
+    );
+
+    assert(
+        marketSellOrder.status === "FILLED",
+        `MARKET SELL should be FILLED but is ${marketSellOrder.status}`,
+    );
+
+    assert(
+        Number(marketSellOrder.remainingQty) === 0,
+        `MARKET SELL remaining quantity should be 0 but is ${marketSellOrder.remainingQty}`,
+    );
+
+    console.log(
+        "\n✅ MARKET SELL FILLED",
+    );
+
+    /*
+     * Verify LIMIT BUY.
+     */
+
+    const finalBuyOrder = await waitForOrder(
+        buyOrderId,
+        buyerToken,
+        ["PARTIALLY_FILLED", "FILLED"],
+    );
+
+    if (finalBuyOrder === null) {
+        throw new Error("finalbuyorder is null");
+    }
+
+    assert(
+        !!finalBuyOrder,
+        "LIMIT BUY did not reach matching state",
+    );
+
+    assert(
+        finalBuyOrder.status === "PARTIALLY_FILLED",
+        `LIMIT BUY should be PARTIALLY_FILLED but is ${finalBuyOrder.status}`,
+    );
+
+    assert(
+        Number(finalBuyOrder.remainingQty) === 0.5,
+        `LIMIT BUY remaining quantity should be 0.5 but is ${finalBuyOrder.remainingQty}`,
+    );
+
+    console.log(
+        "\n✅ LIMIT BUY partially filled correctly",
+    );
+
+    /*
+     * Trade value:
+     *
+     * 0.5 BTC × testPrice
+     */
+
+    const tradeValue =
+        marketSellQty * testPrice;
+
+    const expectedBuyerUSDT =
+        buyerInitialUSDT - tradeValue;
+
+    /*
+     * Buyer BTC.
+     */
+
+    const buyerBTC = await getBalance(
+        buyer.id,
+        "BTC",
+        buyerToken,
+    );
+
+    logResponse(
+        "MARKET SELL TEST - BUYER BTC",
+        buyerBTC,
+    );
+
+    assert(
+        buyerBTC.status === 200,
+        "Could not retrieve buyer BTC balance",
+    );
+
+    assert(
+        Number(buyerBTC.body.available) === 0.5,
+        `Buyer BTC should be 0.5 but is ${buyerBTC.body.available}`,
+    );
+
+    console.log(
+        "\n✅ Buyer BTC settlement correct",
+    );
+
+    /*
+     * Buyer USDT.
+     *
+     * 1 BTC BUY was locked at testPrice.
+     * 0.5 BTC was filled.
+     * 0.5 BTC remains open.
+     *
+     * Therefore:
+     *
+     * available = initial - 0.5 × testPrice
+     * locked = 0.5 × testPrice
+     */
+
+    const buyerUSDT = await waitForBalance(
+        buyer.id,
+        "USDT",
+        buyerToken,
+        expectedBuyerUSDT,
+        tradeValue,
+    );
+
+    assert(
+        !!buyerUSDT,
+        "Buyer USDT balance did not settle correctly",
+    );
+
+    console.log(
+        "\nMARKET SELL TEST - BUYER USDT:",
+        JSON.stringify(buyerUSDT, null, 2),
+    );
+
+    assert(
+        Number(buyerUSDT.available) === expectedBuyerUSDT,
+        `Buyer available USDT should be ${expectedBuyerUSDT} but is ${buyerUSDT.available}`,
+    );
+
+    assert(
+        Number(buyerUSDT.locked) === tradeValue,
+        `Buyer locked USDT should be ${tradeValue} but is ${buyerUSDT.locked}`,
+    );
+
+    console.log(
+        "\n✅ Buyer USDT settlement correct",
+    );
+
+    /*
+     * Seller BTC.
+     *
+     * Seller sold 0.5 BTC.
+     * Remaining 0.5 BTC should be available.
+     */
+
+    const sellerBTC = await waitForBalance(
+        seller.id,
+        "BTC",
+        sellerToken,
+        0.5,
+        0,
+    );
+
+    assert(
+        !!sellerBTC,
+        "Seller BTC balance did not settle correctly",
+    );
+
+    console.log(
+        "\nMARKET SELL TEST - SELLER BTC:",
+        JSON.stringify(sellerBTC, null, 2),
+    );
+
+    assert(
+        Number(sellerBTC.available) === 0.5,
+        `Seller available BTC should be 0.5 but is ${sellerBTC.available}`,
+    );
+
+    assert(
+        Number(sellerBTC.locked) === 0,
+        `Seller locked BTC should be 0 but is ${sellerBTC.locked}`,
+    );
+
+    console.log(
+        "\n✅ Seller BTC settlement correct",
+    );
+
+    /*
+     * Seller USDT.
+     */
+
+    const sellerUSDT = await waitForBalance(
+        seller.id,
+        "USDT",
+        sellerToken,
+        tradeValue,
+        0,
+    );
+
+    assert(
+        !!sellerUSDT,
+        "Seller USDT balance did not settle correctly",
+    );
+
+    console.log(
+        "\nMARKET SELL TEST - SELLER USDT:",
+        JSON.stringify(sellerUSDT, null, 2),
+    );
+
+    assert(
+        Number(sellerUSDT.available) === tradeValue,
+        `Seller available USDT should be ${tradeValue} but is ${sellerUSDT.available}`,
+    );
+
+    assert(
+        Number(sellerUSDT.locked) === 0,
+        `Seller locked USDT should be 0 but is ${sellerUSDT.locked}`,
+    );
+
+    console.log(
+        "\n✅ Seller USDT settlement correct",
+    );
+
+    console.log("\n========================================");
+    console.log("       ✅ MARKET SELL TEST PASSED");
     console.log("========================================");
 }
 
@@ -1004,7 +1452,9 @@ async function main() {
     );
 
     if (buyOrder === null) {
-        throw new Error("❌ BUY order never reached the database");
+        throw new Error(
+            "❌ BUY order never reached the database",
+        );
     }
 
     assert(
@@ -1162,17 +1612,21 @@ async function main() {
     );
 
     console.log("\n=== AFTER MATCH DEBUG ===");
+
     console.log(
         "BUY:",
         JSON.stringify(buyCheck.body, null, 2),
     );
+
     console.log(
         "SELL:",
         JSON.stringify(sellCheck.body, null, 2),
     );
 
     if (sellAfterMatch === null) {
-        throw new Error("❌ SELL order disappeared after matching");
+        throw new Error(
+            "❌ SELL order disappeared after matching",
+        );
     }
 
     assert(
@@ -1191,7 +1645,9 @@ async function main() {
     );
 
     if (buyAfterMatch === null) {
-        throw new Error("❌ BUY order disappeared after matching");
+        throw new Error(
+            "❌ BUY order disappeared after matching",
+        );
     }
 
     console.log(
@@ -1402,12 +1858,20 @@ async function main() {
 
     /*
      * -------------------------------------
-     * 21. INVALID JWT
+     * 21. MARKET SELL
+     * -------------------------------------
+     */
+
+    await testMarketSell();
+
+    /*
+     * -------------------------------------
+     * 22. INVALID JWT
      * -------------------------------------
      */
 
     console.log(
-        "\n21. Testing invalid JWT...",
+        "\n22. Testing invalid JWT...",
     );
 
     const invalidToken = await request(
@@ -1469,10 +1933,13 @@ async function main() {
     console.log("✅ Order cancellation");
     console.log("✅ Funds unlocking");
     console.log("✅ MARKET BUY");
+    console.log("✅ MARKET SELL");
     console.log("✅ Invalid JWT rejection");
     console.log("✅ Redis consumer recovery");
 
-    console.log("\nCEX V2 API + AUTH + MARKET BUY TEST COMPLETE.");
+    console.log(
+        "\nCEX V2 COMPLETE API TEST PASSED.",
+    );
 }
 
 main().catch((error) => {
