@@ -83,14 +83,70 @@ app.post("/orders",authMiddleware, async (req:AuthRequest,res )=>{
             qty,
             price,
         } = req.body;
+
         const userId = req.userId;
-        if (!userId || !side || !type || !qty) {
-            return res.status(400).json({
-                error: "userId, side, type and qty are required",
+
+        if (!userId) {
+            return res.status(401).json({
+                error: "Unauthorized",
             });
         }
-        const orderId = crypto.randomUUID();
-        console.log("Order received by backend:");
+
+        if (
+            side !== "BUY" &&
+            side !== "SELL"
+        ) {
+            return res.status(400).json({
+                error: "side must be BUY or SELL",
+            });
+        }
+
+        if (
+            type !== "LIMIT" &&
+            type !== "MARKET"
+        ) {
+            return res.status(400).json({
+                error: "type must be LIMIT or MARKET",
+            });
+        }
+
+        if (
+            typeof qty !== "number" ||
+            !Number.isFinite(qty) ||
+            qty <= 0
+        ) {
+            return res.status(400).json({
+                error: "qty must be a positive number",
+            });
+        }
+
+        if (type === "LIMIT") {
+            if (
+                typeof price !== "number" ||
+                !Number.isFinite(price) ||
+                price <= 0
+            ) {
+                return res.status(400).json({
+                    error: "LIMIT orders require a positive price",
+                });
+            }
+        }
+
+        if (type === "MARKET") {
+            if (price !== undefined) {
+                return res.status(400).json({
+                    error: "MARKET orders must not include a price",
+                });
+            }
+        }
+
+        const orderId =
+            crypto.randomUUID();
+
+        console.log(
+            "Order received by backend:",
+        );
+
         console.log({
             orderId,
             userId,
@@ -99,70 +155,112 @@ app.post("/orders",authMiddleware, async (req:AuthRequest,res )=>{
             qty,
             price,
         });
-        const messageId = await publishOrder({
-            orderId,
-            userId,
-            side,
-            type,
-            qty,
-            price
-        });
-        console.log("Order published to Redis:");
-        console.log("Redis Message ID:", messageId);
 
-        res.status(201).json({
+        const messageId =
+            await publishOrder({
+                orderId,
+                userId,
+                side,
+                type,
+                qty,
+                price,
+            });
+
+        console.log(
+            "Order published to Redis:",
+        );
+
+        console.log(
+            "Redis Message ID:",
+            messageId,
+        );
+
+        return res.status(201).json({
             message:"Order queued",
             orderId,
             redisMessageId:messageId,
         });
+
     } catch (error) {
-        console.error("Queue order error:", error);
-
-        res.status(500).json({
-            error: "Failed to queue order",
-        });
-    }  
-});
-app.delete("/orders/:orderId",authMiddleware, async (req:AuthRequest, res) => {
-    try {
-        const { orderId } = req.params;
-        const  userId  = req.userId;
-        if (typeof orderId !== "string") {
-            return res.status(400).json({
-                error: "Invalid order ID",
-            });
-        }
-
-        if (!userId) {
-            return res.status(400).json({
-                error: "userId is required",
-            });
-        }
-
-        const redisMessageId = await redis.xadd(
-            "cex:orders",
-            "*",
-            "action",
-            "CANCEL",
-            "orderId",
-            orderId,
-            "userId",
-            userId,
+        console.error(
+            "Queue order error:",
+            error,
         );
 
-        return res.json({
-            message: "Cancellation queued",
-            orderId,
-            redisMessageId,
-        });
-    } catch (error) {
-        console.error("Cancel order error:", error);
-
         return res.status(500).json({
-            error: "Failed to queue cancellation",
+            error: "Failed to queue order",
         });
     }
 });
+app.delete("/orders/:orderId",authMiddleware,async (req: AuthRequest, res) => {
+        try {
+            const userId = req.userId;
+
+            if (!userId) {
+                return res.status(401).json({
+                    error: "Unauthorized",
+                });
+            }
+
+            const orderIdParam  = req.params.orderId;
+
+            if (typeof orderIdParam !=="string" || orderIdParam.length ===0) {
+                return res.status(400).json({
+                    error: "orderId is required",
+                });
+            }
+            const orderId = orderIdParam
+            const order = await getOrderById(orderId);
+
+            if (!order) {
+                return res.status(404).json({
+                    error: "Order not found",
+                });
+            }
+
+            if (order.userId !== userId) {
+                return res.status(403).json({
+                    error: "You cannot cancel another user's order",
+                });
+            }
+
+            if (
+                order.status === "FILLED" ||
+                order.status === "CANCELLED"
+            ) {
+                return res.status(400).json({
+                    error: `Order cannot be cancelled because it is already ${order.status}`,
+                });
+            }
+
+            const messageId = await redis.xadd(
+                "cex:orders",
+                "*",
+                "action",
+                "CANCEL",
+                "orderId",
+                orderId,
+                "userId",
+                userId,
+            );
+
+            return res.status(200).json({
+                message: "Cancellation queued",
+                orderId,
+                redisMessageId: messageId,
+            });
+        } catch (error) {
+            console.error(
+                "Cancel order error:",
+                error,
+            );
+
+            return res.status(500).json({
+                error: "Internal server error",
+            });
+        }
+    },
+);
 app.post("/users/:userId/balances",authMiddleware, async (req:AuthRequest ,res )=>{
     try {
         const {userId} = req.params;
