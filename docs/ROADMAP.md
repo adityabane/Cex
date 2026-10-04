@@ -29,8 +29,8 @@
 - [O] Market data
 - [O] Subscriptions
 - [O] Recovery
-- [ ] Snapshots
-- [ ] Event replay if required
+- [O] Snapshots
+- [O] Event replay if required
 - [ ] End-to-end testing
 - [ ] Docker
 - [ ] Load testing
