@@ -62,6 +62,9 @@ export async function matchBuyOrder(buyOrderId: string) {
             currentBuy.id,
             bestAsk.id
         );
+        if (!trade) {
+            continue;
+        }
         const updatedBuyOrder = await prisma.order.findUnique({
             where: { id: currentBuy.id },
         });
@@ -202,6 +205,9 @@ export async function matchSellOrder(sellOrderId: string,createdAfter?:Date) {
             bestBid.id,
             currentSell.id
         );
+        if (!trade) {
+            continue;
+        }
 
         const updatedBuyOrder = await prisma.order.findUnique({
             where: { id: bestBid.id },
