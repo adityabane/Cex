@@ -35,6 +35,7 @@ export async function saveOrder(order:Order){
 }
 export async function createOrderInDb(id:string,userId:string,asset:string,side:OrderSide,type:OrderType,qty:number,price?:number) {
     let marketBuyReservedUSDT: number | undefined;
+    const normalizedAsset = asset.trim().toUpperCase();
     const order:Order={
         id,
         userId,
@@ -44,9 +45,8 @@ export async function createOrderInDb(id:string,userId:string,asset:string,side:
         remainingqty: qty,
         price,
         status: "OPEN",
-        asset: asset.toUpperCase(),
+        asset: normalizedAsset,
     };
-    const normalizedAsset = asset.trim().toUpperCase();
     ValidateOrder(order);
     if (type === "LIMIT") {
         if (price === undefined) {
@@ -61,7 +61,7 @@ export async function createOrderInDb(id:string,userId:string,asset:string,side:
         const assetToLock =
             side === "BUY"
                 ? "USDT"
-                : asset.toUpperCase();
+                : normalizedAsset;
 
         await lockBalance(userId, assetToLock, requiredAmount);
     }
@@ -74,7 +74,7 @@ export async function createOrderInDb(id:string,userId:string,asset:string,side:
             throw new Error("Insufficient USDT balance");
         }
         const requiredUSDT = await calculateMarketBuyRequiredUSDT(
-            asset.toUpperCase(),
+            normalizedAsset,
             qty,
         );
 
@@ -89,10 +89,10 @@ export async function createOrderInDb(id:string,userId:string,asset:string,side:
         );
     }
     if (type === "MARKET" && side === "SELL") {
-        const balance = await getBalance(userId, asset.toUpperCase());
+        const balance = await getBalance(userId, normalizedAsset);
 
         if (!balance) {
-            throw new Error(`Balance not found for ${asset.toUpperCase()}`);
+            throw new Error(`Balance not found for ${normalizedAsset}`);
         }
 
         if (balance.available.lt(qty)) {
@@ -101,7 +101,7 @@ export async function createOrderInDb(id:string,userId:string,asset:string,side:
 
         await lockBalance(
             userId,
-            asset.toUpperCase(),
+            normalizedAsset,
             qty,
         );
     }
@@ -111,7 +111,7 @@ export async function createOrderInDb(id:string,userId:string,asset:string,side:
             userId,
             side,
             type,
-            asset: asset.toUpperCase(),
+            asset: normalizedAsset,
             quantity: qty,
             remainingQty: qty,
             price,
@@ -121,9 +121,9 @@ export async function createOrderInDb(id:string,userId:string,asset:string,side:
     });
     
 }
-export function CreateOrder(id:string,userId:string,side:OrderSide,type:OrderType,qty:number,price?:number):Order{
+export function CreateOrder(id:string,userId:string,asset:string,side:OrderSide,type:OrderType,qty:number,price?:number):Order{
     return {
-        id,userId,side,type,asset:"BTC",qty,remainingqty:qty,price,status:"OPEN"
+        id,userId,side,type,asset:asset.trim().toUpperCase(),qty,remainingqty:qty,price,status:"OPEN"
     }
 }
 export function ValidateOrder(order:Order):void{
@@ -151,7 +151,7 @@ export function LockOrderBalance(account:Account,order:Order):void{
         }
         if(order.side==="SELL"){
             const amount = order.qty;
-            BalanceLock("BTC",account,amount);
+            BalanceLock(order.asset,account,amount);
         }
     }
 }

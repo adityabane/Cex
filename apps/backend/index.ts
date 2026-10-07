@@ -78,7 +78,7 @@ app.post("/users",async (req,res)=>{
 app.post("/orders",authMiddleware, async (req:AuthRequest,res )=>{
     try{
         const {
-            asset = "BTC",
+            asset,
             side,
             type,
             qty,

@@ -178,9 +178,14 @@ async function processOrderMessage(
                 "Missing qty in Redis event",
             );
         }
-        const asset = order.asset
-            ? order.asset.toUpperCase()
-            : "BTC";
+        if (!order.asset) {
+            throw new Error(
+                "Missing asset in Redis event",
+            );
+        }
+
+        const asset =
+            order.asset.trim().toUpperCase();
 
         await submitOrder(
             order.orderId,

@@ -43,7 +43,11 @@ export class Orderbook {
             if (!buyer || !seller) {
                 throw new Error("Account not found");
             }
-            settleTrade(buyer,seller,tradeqty,executionPrice);
+            if (bestBid.asset !== bestAsk.asset) {
+                throw new Error("Cannot match orders for different assets");
+            }
+
+            settleTrade(buyer,seller,bestAsk.asset ,tradeqty,executionPrice);
             console.log("TRADE");
             console.log("price:", executionPrice);
             console.log("quantity:", tradeqty);
@@ -104,7 +108,10 @@ export class Orderbook {
                 throw new Error("Account not Found");
             }
             const tradeqty = Math.min(order.remainingqty,bestAsk.remainingqty);
-            settleTrade(buyer,seller,tradeqty,bestAsk.price);
+            if (order.asset !== bestAsk.asset) {
+                throw new Error("Cannot match orders for different assets");
+            }
+            settleTrade(buyer,seller,bestAsk.asset ,tradeqty,bestAsk.price);
             console.log("TRADE");
             console.log("price:",bestAsk.price);
             console.log("quantity:",tradeqty);
@@ -133,7 +140,10 @@ export class Orderbook {
                 throw new Error("Account not Found");
             }
             const tradeqty = Math.min(order.remainingqty,bestBid.remainingqty);
-            settleTrade(buyer,seller,tradeqty,bestBid.price);
+            if (order.asset !== bestBid.asset) {
+                throw new Error("Cannot match orders for different assets");
+            }
+            settleTrade(buyer,seller,order.asset ,tradeqty,bestBid.price);
             console.log("TRADE");
             console.log("price:",bestBid.price);
             console.log("quantity:",tradeqty);
