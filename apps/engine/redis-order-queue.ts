@@ -5,6 +5,7 @@ const ORDER_STREAM = "cex:orders";
 export type OrderEvent = {
     orderId: string;
     userId :string;
+    asset:string;
     side:string;
     type:string;
     qty:number;
@@ -19,6 +20,8 @@ export async function publishOrder(order: OrderEvent) {
         order.orderId,
         "userId",
         order.userId,
+        "asset",
+        order.asset,
         "side",
         order.side,
         "type",

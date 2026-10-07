@@ -35,7 +35,7 @@ export async function matchBuyOrder(buyOrderId: string) {
         ) {
             break;
         }
-        const bestAsk = await getBestAsk("BTC");
+        const bestAsk = await getBestAsk(currentBuy.asset);
 
         if (!bestAsk) {
             break;
@@ -177,7 +177,7 @@ export async function matchSellOrder(sellOrderId: string,createdAfter?:Date) {
         //     break;
         // }
 
-        const bestBid = await getBestBid("BTC",createdAfter);
+        const bestBid = await getBestBid(currentSell.asset,createdAfter);
 
         if (!bestBid) {
             break;
@@ -257,7 +257,7 @@ export async function matchSellOrder(sellOrderId: string,createdAfter?:Date) {
         if (finalSell.remainingQty.gt(0)) {
             await unlockBalance(
                 finalSell.userId,
-                "BTC",
+                finalSell.asset,
                 Number(finalSell.remainingQty),
             );
 

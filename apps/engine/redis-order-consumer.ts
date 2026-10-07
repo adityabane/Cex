@@ -178,10 +178,14 @@ async function processOrderMessage(
                 "Missing qty in Redis event",
             );
         }
+        const asset = order.asset
+            ? order.asset.toUpperCase()
+            : "BTC";
 
         await submitOrder(
             order.orderId,
             order.userId,
+            asset,
             order.side as OrderSide,
             order.type as OrderType,
             Number(order.qty),

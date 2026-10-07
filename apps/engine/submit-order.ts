@@ -10,6 +10,7 @@ import { publishOrderStatusEvent } from "./redis-order-status";
 export async function submitOrder(
     id: string,
     userId: string,
+    asset:string,
     side: OrderSide,
     type: OrderType,
     qty: number,
@@ -18,6 +19,7 @@ export async function submitOrder(
     const order = await createOrderInDb(
         id,
         userId,
+        asset,
         side,
         type,
         qty,

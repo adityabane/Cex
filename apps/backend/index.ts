@@ -78,6 +78,7 @@ app.post("/users",async (req,res)=>{
 app.post("/orders",authMiddleware, async (req:AuthRequest,res )=>{
     try{
         const {
+            asset = "BTC",
             side,
             type,
             qty,
@@ -91,7 +92,16 @@ app.post("/orders",authMiddleware, async (req:AuthRequest,res )=>{
                 error: "Unauthorized",
             });
         }
+        if (
+            typeof asset !== "string" ||
+            asset.trim().length === 0
+        ) {
+            return res.status(400).json({
+                error: "asset is required",
+            });
+        }
 
+        const normalizedAsset = asset.trim().toUpperCase();
         if (
             side !== "BUY" &&
             side !== "SELL"
@@ -150,6 +160,7 @@ app.post("/orders",authMiddleware, async (req:AuthRequest,res )=>{
         console.log({
             orderId,
             userId,
+            asset:normalizedAsset,
             side,
             type,
             qty,
@@ -160,6 +171,7 @@ app.post("/orders",authMiddleware, async (req:AuthRequest,res )=>{
             await publishOrder({
                 orderId,
                 userId,
+                asset:normalizedAsset,
                 side,
                 type,
                 qty,

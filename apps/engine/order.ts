@@ -11,7 +11,7 @@ export type Order = {
     userId:string;
     side : OrderSide;
     type:OrderType;
-    asset :"BTC";
+    asset :string;
     qty:number;
     price?:number;
     remainingqty:number;
@@ -33,19 +33,20 @@ export async function saveOrder(order:Order){
     })
     
 }
-export async function createOrderInDb(id:string,userId:string,side:OrderSide,type:OrderType,qty:number,price?:number) {
+export async function createOrderInDb(id:string,userId:string,asset:string,side:OrderSide,type:OrderType,qty:number,price?:number) {
     let marketBuyReservedUSDT: number | undefined;
     const order:Order={
         id,
         userId,
         side,
         type,
-        asset: "BTC",
         qty,
         remainingqty: qty,
         price,
         status: "OPEN",
+        asset: asset.toUpperCase(),
     };
+    const normalizedAsset = asset.trim().toUpperCase();
     ValidateOrder(order);
     if (type === "LIMIT") {
         if (price === undefined) {
@@ -60,7 +61,7 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
         const assetToLock =
             side === "BUY"
                 ? "USDT"
-                : "BTC";
+                : asset.toUpperCase();
 
         await lockBalance(userId, assetToLock, requiredAmount);
     }
@@ -73,7 +74,7 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
             throw new Error("Insufficient USDT balance");
         }
         const requiredUSDT = await calculateMarketBuyRequiredUSDT(
-            "BTC",
+            asset.toUpperCase(),
             qty,
         );
 
@@ -88,10 +89,10 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
         );
     }
     if (type === "MARKET" && side === "SELL") {
-        const balance = await getBalance(userId, "BTC");
+        const balance = await getBalance(userId, asset.toUpperCase());
 
         if (!balance) {
-            throw new Error("Balance not found for BTC");
+            throw new Error(`Balance not found for ${asset.toUpperCase()}`);
         }
 
         if (balance.available.lt(qty)) {
@@ -100,7 +101,7 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
 
         await lockBalance(
             userId,
-            "BTC",
+            asset.toUpperCase(),
             qty,
         );
     }
@@ -110,7 +111,7 @@ export async function createOrderInDb(id:string,userId:string,side:OrderSide,typ
             userId,
             side,
             type,
-            asset: "BTC",
+            asset: asset.toUpperCase(),
             quantity: qty,
             remainingQty: qty,
             price,

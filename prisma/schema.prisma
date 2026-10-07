@@ -44,6 +44,7 @@ model Order {
   user         User     @relation(fields: [userId], references: [id])
   buyTrades    Trade[]  @relation("BuyOrder")
   sellTrades   Trade[]  @relation("SellOrder")
+ 
 }
 
 model Trade {

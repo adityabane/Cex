@@ -55,7 +55,7 @@ if (
     assetToUnlock =
         order.side === "BUY"
             ? "USDT"
-            : "BTC";
+            : order.asset;
 }
     await unlockBalance(userId,assetToUnlock,unlockAmount);
     return prisma.order.update({
