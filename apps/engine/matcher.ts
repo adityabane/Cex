@@ -218,7 +218,13 @@ export async function matchOrders(buyOrderId:string,sellOrderId:string){
                 available:{increment:tradeValue}
             },
         });
-
+        console.log("MATCHER TRADE CREATED:", {
+    tradeId: trade.id,
+    buyOrderId: buyOrder.id,
+    sellOrderId: sellOrder.id,
+    quantity: Number(quantity),
+    price: Number(tradePrice),
+});
         return trade;
 
     },{
