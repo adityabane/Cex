@@ -254,6 +254,27 @@ async function testAsset(
         asset,
         sellerBalance,
     );
+    const buyerUSDT =
+    await getBalance(
+        buyer,
+        "USDT",
+    );
+
+const sellerAsset =
+    await getBalance(
+        seller,
+        asset,
+    );
+
+console.log(
+    "BUYER USDT BEFORE ORDER:",
+    buyerUSDT,
+);
+
+console.log(
+    `SELLER ${asset} BEFORE ORDER:`,
+    sellerAsset,
+);
 
     console.log(
         `Balances created for ${asset}`,

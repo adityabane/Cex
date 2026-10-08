@@ -37,7 +37,14 @@ export async function lockBalance(userId:string,asset:string,amount:number){
                     `Balance not found for ${asset}`
                 );
             }
-    
+            console.log("LOCK BALANCE DEBUG:", {
+    userId,
+    asset,
+    available: balance.available.toString(),
+    locked: balance.locked.toString(),
+    amount,
+    insufficient: balance.available.lt(amount),
+});
             if (balance.available.lt(amount)) {
                 throw new Error(
                     `Insufficient ${asset} balance`

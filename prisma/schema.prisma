@@ -5,17 +5,15 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-
-  
 }
 
 model User {
-  id        String    @id @default(uuid())
-  email     String   @unique
-  passwordHash   String    
-  createdAt DateTime  @default(now())
-  balances  Balance[]
-  orders    Order[]
+  id           String    @id @default(uuid())
+  createdAt    DateTime  @default(now())
+  email        String    @unique
+  passwordHash String
+  balances     Balance[]
+  orders       Order[]
 }
 
 model Balance {
@@ -30,21 +28,22 @@ model Balance {
 }
 
 model Order {
-  id           String   @id
-  userId       String
-  side         String
-  type         String
-  asset        String
-  quantity     Decimal  @db.Decimal(30, 10)
-  remainingQty Decimal  @db.Decimal(30, 10)
-  price        Decimal? @db.Decimal(30, 10)
-  marketBuyReservedUSDT   Decimal? @db.Decimal(30,10)
-  status       String
-  createdAt    DateTime @default(now())
-  user         User     @relation(fields: [userId], references: [id])
-  buyTrades    Trade[]  @relation("BuyOrder")
-  sellTrades   Trade[]  @relation("SellOrder")
- 
+  id                    String   @id
+  userId                String
+  side                  String
+  type                  String
+  asset                 String
+  quantity              Decimal  @db.Decimal(30, 10)
+  remainingQty          Decimal  @db.Decimal(30, 10)
+  price                 Decimal? @db.Decimal(30, 10)
+  status                String
+  createdAt             DateTime @default(now())
+  marketBuyReservedUSDT Decimal? @db.Decimal(30, 10)
+  user                  User     @relation(fields: [userId], references: [id])
+  buyTrades             Trade[]  @relation("BuyOrder")
+  sellTrades            Trade[]  @relation("SellOrder")
+
+  @@index([asset, side, status, price, createdAt])
 }
 
 model Trade {
@@ -55,5 +54,8 @@ model Trade {
   quantity    Decimal  @db.Decimal(30, 10)
   createdAt   DateTime @default(now())
   buyOrder    Order    @relation("BuyOrder", fields: [buyOrderId], references: [id])
+
   sellOrder   Order    @relation("SellOrder", fields: [sellOrderId], references: [id])
 }
+
+

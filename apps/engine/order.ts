@@ -96,7 +96,7 @@ export async function createOrderInDb(id:string,userId:string,asset:string,side:
         }
 
         if (balance.available.lt(qty)) {
-            throw new Error("Insufficient BTC balance");
+            throw new Error(`Insufficient ${normalizedAsset} balance`);
         }
 
         await lockBalance(
