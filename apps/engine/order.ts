@@ -33,10 +33,19 @@ export async function saveOrder(order:Order){
     })
     
 }
-export async function createOrderInDb(id:string,userId:string,asset:string,side:OrderSide,type:OrderType,qty:number,price?:number) {
+export async function createOrderInDb(
+    id: string,
+    userId: string,
+    asset: string,
+    side: OrderSide,
+    type: OrderType,
+    qty: number,
+    price?: number,
+) {
     let marketBuyReservedUSDT: number | undefined;
     const normalizedAsset = asset.trim().toUpperCase();
-    const order:Order={
+
+    const order: Order = {
         id,
         userId,
         side,
@@ -47,79 +56,166 @@ export async function createOrderInDb(id:string,userId:string,asset:string,side:
         status: "OPEN",
         asset: normalizedAsset,
     };
+
     ValidateOrder(order);
-    if (type === "LIMIT") {
-        if (price === undefined) {
-            throw new Error("Price Undefined");
+
+    return prisma.$transaction(async (tx) => {
+        // Redis may deliver the same order more than once.
+        // If the order already exists, do not lock its balance again.
+        const existingOrder = await tx.order.findUnique({
+            where: {
+                id,
+            },
+        });
+
+        if (existingOrder) {
+            return existingOrder;
         }
 
-        const requiredAmount =
-            side === "BUY"
-                ? qty * price
-                : qty;
+        const lock = async (assetToLock: string, amount: number) => {
+            if (amount <= 0) {
+                throw new Error("Invalid lock amount");
+            }
 
-        const assetToLock =
-            side === "BUY"
-                ? "USDT"
-                : normalizedAsset;
+            const balance = await tx.balance.findUnique({
+                where: {
+                    userId_asset: {
+                        userId,
+                        asset: assetToLock,
+                    },
+                },
+            });
 
-        await lockBalance(userId, assetToLock, requiredAmount);
-    }
-    if(type ==="MARKET" && side==="BUY"){
-        const balance = await getBalance(userId, "USDT");
-        if (!balance) {
-            throw new Error("Balance not found for USDT");
+            if (!balance) {
+                throw new Error(
+                    `Balance not found for ${assetToLock}`,
+                );
+            }
+
+            if (balance.available.lt(amount)) {
+                throw new Error(
+                    `Insufficient ${assetToLock} balance`,
+                );
+            }
+
+            await tx.balance.update({
+                where: {
+                    userId_asset: {
+                        userId,
+                        asset: assetToLock,
+                    },
+                },
+                data: {
+                    available: {
+                        decrement: amount,
+                    },
+                    locked: {
+                        increment: amount,
+                    },
+                },
+            });
+        };
+
+        if (type === "LIMIT") {
+            if (price === undefined) {
+                throw new Error("Price Undefined");
+            }
+
+            const requiredAmount =
+                side === "BUY"
+                    ? qty * price
+                    : qty;
+
+            const assetToLock =
+                side === "BUY"
+                    ? "USDT"
+                    : normalizedAsset;
+
+            await lock(assetToLock, requiredAmount);
         }
-        if (balance.available.lte(0)) {
-            throw new Error("Insufficient USDT balance");
-        }
-        const requiredUSDT = await calculateMarketBuyRequiredUSDT(
-            normalizedAsset,
-            qty,
-        );
 
-        if (balance.available.lt(requiredUSDT)) {
-            throw new Error("Insufficient USDT balance");
-        }
-        marketBuyReservedUSDT = requiredUSDT
-        await lockBalance(
-            userId,
-            "USDT",
-            requiredUSDT,
-        );
-    }
-    if (type === "MARKET" && side === "SELL") {
-        const balance = await getBalance(userId, normalizedAsset);
+        if (type === "MARKET" && side === "BUY") {
+            const balance = await tx.balance.findUnique({
+                where: {
+                    userId_asset: {
+                        userId,
+                        asset: "USDT",
+                    },
+                },
+            });
 
-        if (!balance) {
-            throw new Error(`Balance not found for ${normalizedAsset}`);
+            if (!balance) {
+                throw new Error("Balance not found for USDT");
+            }
+
+            if (balance.available.lte(0)) {
+                throw new Error("Insufficient USDT balance");
+            }
+
+            // This function currently reads through Prisma itself,
+            // so we calculate the required amount before the transaction
+            // lock is applied below.
+            const requiredUSDT =
+                await calculateMarketBuyRequiredUSDT(
+                    normalizedAsset,
+                    qty,
+                );
+
+            if (balance.available.lt(requiredUSDT)) {
+                throw new Error("Insufficient USDT balance");
+            }
+
+            marketBuyReservedUSDT = requiredUSDT;
+
+            await lock(
+                "USDT",
+                requiredUSDT,
+            );
         }
 
-        if (balance.available.lt(qty)) {
-            throw new Error(`Insufficient ${normalizedAsset} balance`);
+        if (type === "MARKET" && side === "SELL") {
+            const balance = await tx.balance.findUnique({
+                where: {
+                    userId_asset: {
+                        userId,
+                        asset: normalizedAsset,
+                    },
+                },
+            });
+
+            if (!balance) {
+                throw new Error(
+                    `Balance not found for ${normalizedAsset}`,
+                );
+            }
+
+            if (balance.available.lt(qty)) {
+                throw new Error(
+                    `Insufficient ${normalizedAsset} balance`,
+                );
+            }
+
+            await lock(
+                normalizedAsset,
+                qty,
+            );
         }
 
-        await lockBalance(
-            userId,
-            normalizedAsset,
-            qty,
-        );
-    }
-    return prisma.order.create({
-        data:{
-            id,
-            userId,
-            side,
-            type,
-            asset: normalizedAsset,
-            quantity: qty,
-            remainingQty: qty,
-            price,
-            marketBuyReservedUSDT,
-            status: "OPEN",
-        },
+        return tx.order.create({
+            data: {
+                id,
+                userId,
+                side,
+                type,
+                asset: normalizedAsset,
+                quantity: qty,
+                remainingQty: qty,
+                price,
+                marketBuyReservedUSDT,
+                status: "OPEN",
+            },
+        });
     });
-    
 }
 export function CreateOrder(id:string,userId:string,asset:string,side:OrderSide,type:OrderType,qty:number,price?:number):Order{
     return {
