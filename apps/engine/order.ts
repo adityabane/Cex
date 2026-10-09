@@ -62,6 +62,18 @@ export async function createOrderInDb(
     return prisma.$transaction(async (tx) => {
         // Redis may deliver the same order more than once.
         // If the order already exists, do not lock its balance again.
+        // Serialize concurrent processing attempts for the same order ID.
+        
+await tx.$queryRaw<Array<{ locked: number }>>`
+    WITH lock_guard AS MATERIALIZED (
+        SELECT pg_advisory_xact_lock(
+            hashtextextended(${id}, 0)
+        )
+    )
+    SELECT 1 AS locked
+    FROM lock_guard
+`;
+
         const existingOrder = await tx.order.findUnique({
             where: {
                 id,
