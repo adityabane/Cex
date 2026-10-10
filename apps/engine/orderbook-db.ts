@@ -1,10 +1,10 @@
 import { prisma } from "./db";
-
+import { measureDbOperation } from "./metrics";
 export async function getBestAsk(
     asset: string,
     createdAfter?: Date
 ) {
-    return prisma.order.findFirst({
+    return measureDbOperation(()=> prisma.order.findFirst({
         where: {
             asset,
             side: "SELL",
@@ -28,14 +28,14 @@ export async function getBestAsk(
                 createdAt: "asc",
             },
         ],
-    });
+    }));
 }
 
 export async function getBestBid(
     asset: string,
     createdAfter?: Date
 ) {
-    return prisma.order.findFirst({
+    return measureDbOperation(()=> prisma.order.findFirst({
         where: {
             asset,
             side: "BUY",
@@ -60,7 +60,7 @@ export async function getBestBid(
                 createdAt: "asc",
             },
         ],
-    });
+    }));
 }
 
 export async function calculateMarketBuyRequiredUSDT(
@@ -70,30 +70,30 @@ export async function calculateMarketBuyRequiredUSDT(
     let remainingQty = quantity;
     let requiredUSDT = 0;
 
-    const asks = await prisma.order.findMany({
-        where: {
-            asset,
-            side: "SELL",
-            type: "LIMIT",
-            status: {
-                in: ["OPEN", "PARTIALLY_FILLED"],
-            },
-            remainingQty: {
-                gt: 0,
-            },
-            price: {
-                not: null,
-            },
+    const asks = await measureDbOperation(()=>prisma.order.findMany({
+    where: {
+        asset,
+        side: "SELL",
+        type: "LIMIT",
+        status: {
+            in: ["OPEN", "PARTIALLY_FILLED"],
         },
-        orderBy: [
-            {
-                price: "asc",
-            },
-            {
-                createdAt: "asc",
-            },
-        ],
-    });
+        remainingQty: {
+            gt: 0,
+        },
+        price: {
+            not: null,
+        },
+    },
+    select: {
+        price: true,
+        remainingQty: true,
+    },
+    orderBy: [
+        { price: "asc" },
+        { createdAt: "asc" },
+    ],
+}));
 
     for (const ask of asks) {
         if (remainingQty <= 0) {

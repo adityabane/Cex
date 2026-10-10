@@ -10,6 +10,8 @@ import { createToken } from "./auth";
 import {prisma} from "../engine/db";
 import { authMiddleware } from "./auth-middleware";
 import type {AuthRequest } from "./auth-middleware";
+import { admitOrderRequest } from "./order-admission";
+
 const app = express();
 app.use(express.json());
 app.get("/",(_req,res)=>{
@@ -100,6 +102,25 @@ app.post("/orders",authMiddleware, async (req:AuthRequest,res )=>{
                 error: "asset is required",
             });
         }
+        const admission = await admitOrderRequest(userId);
+if (!admission.allowed) {
+    const status = admission.reason === "user_rate_limit" ? 429 : 503;
+    return Response.json(
+        {
+            error: admission.reason === "user_rate_limit"
+                ? "Order rate limit exceeded"
+                : "Order queue is overloaded",
+            retryAfterMs: admission.retryAfterMs,
+            backlog: admission.backlog,
+        },
+        {
+            status,
+            headers: {
+                "Retry-After": String(Math.max(1, Math.ceil(admission.retryAfterMs / 1000))),
+            },
+        },
+    );
+}
 
         const normalizedAsset = asset.trim().toUpperCase();
         if (

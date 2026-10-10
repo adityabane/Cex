@@ -5,6 +5,7 @@ import type {OrderSide,OrderType} from "./order";
 import {getOrderBookSnapshot} from "../backend/orderbook-snapshot";
 import {publishDepthEvent} from "./redis-depth";
 import {publishOrderStatusEvent} from "./redis-order-status";
+import { recordOrderFailed, recordOrderProcessed } from "./metrics";
 
 const ORDER_STREAM = "cex:orders";
 const CONSUMER_GROUP = "cex-order-engine";
@@ -91,18 +92,18 @@ async function setupConsumerGroup(): Promise<void> {
     }
 }
 
-async function processOrderMessage(
+async function processOrderMessageInternal(
     messageId: string,
     fields: string[],
 ): Promise<void> {
     const order =
         parseFields(fields);
 
-    console.log(
-        "Order received from Redis:",
-    );
+    // console.log(
+    //     "Order received from Redis:",
+    // );
 
-    console.log(order);
+    // console.log(order);
 
     if (order.action === "CANCEL") {
         if (!order.orderId) {
@@ -199,9 +200,9 @@ async function processOrderMessage(
                 : undefined,
         );
 
-        console.log(
-            `Order ${order.orderId} processed`,
-        );
+        // console.log(
+        //     `Order ${order.orderId} processed`,
+        // );
     }
 
     await redis.xack(
@@ -210,26 +211,50 @@ async function processOrderMessage(
         messageId,
     );
 
-    console.log(
-        `Redis message ${messageId} acknowledged`,
-    );
+    // console.log(
+    //     `Redis message ${messageId} acknowledged`,
+    // );
+}
+async function processOrderMessage(messageId: string, fields: string[]): Promise<void> {
+    const startedAt = performance.now();
+    try {
+        await processOrderMessageInternal(messageId, fields);
+        recordOrderProcessed(performance.now() - startedAt);
+    } catch (error) {
+        recordOrderFailed();
+        throw error;
+    }
 }
 
 async function readMessages(
     messageId: "0" | ">",
 ): Promise<RedisStreamResult | null> {
+    if (messageId === ">") {
+        return await redis.xreadgroup(
+            "GROUP",
+            CONSUMER_GROUP,
+            CONSUMER_NAME,
+            "COUNT",
+            100,
+            "BLOCK",
+            1000,
+            "STREAMS",
+            ORDER_STREAM,
+            messageId,
+        ) as RedisStreamResult | null;
+    }
+
     return await redis.xreadgroup(
         "GROUP",
         CONSUMER_GROUP,
         CONSUMER_NAME,
         "COUNT",
-        10,
+        100,
         "STREAMS",
         ORDER_STREAM,
         messageId,
     ) as RedisStreamResult | null;
 }
-
 /*
  * Recover pending messages that have been idle
  * for longer than PENDING_MESSAGE_IDLE_TIME.
@@ -434,16 +459,6 @@ async function consumeOrders(): Promise<void> {
                     }
                 }
             }
-
-            await new Promise(
-                (
-                    resolve,
-                ) =>
-                    setTimeout(
-                        resolve,
-                        1000,
-                    ),
-            );
         } catch (error: unknown) {
             console.error(
                 "Redis consumer error:",

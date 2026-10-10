@@ -3,10 +3,9 @@ import {
     matchBuyOrder,
     matchSellOrder,
 } from "./matching-engine.ts";
-import { getOrderBookSnapshot } from "../backend/orderbook-snapshot";
-import { publishDepthEvent } from "./redis-depth";
+import { scheduleDepthUpdate } from "./depth-update-scheduler";
 import { publishOrderStatusEvent } from "./redis-order-status";
-
+import { measureDbOperation } from "./metrics";
 export async function submitOrder(
     id: string,
     userId: string,
@@ -16,7 +15,7 @@ export async function submitOrder(
     qty: number,
     price?: number,
 ) {
-    const order = await createOrderInDb(
+    const order = await measureDbOperation(()=>createOrderInDb(
         id,
         userId,
         asset,
@@ -24,7 +23,7 @@ export async function submitOrder(
         type,
         qty,
         price,
-    );
+    ));
     await publishOrderStatusEvent({
     type: "ORDER_STATUS",
     userId: order.userId,
@@ -40,14 +39,7 @@ export async function submitOrder(
         result = await matchSellOrder(order.id);
     }
 
-    const snapshot = await getOrderBookSnapshot(order.asset);
-
-    await publishDepthEvent({
-        type: "DEPTH",
-        asset: order.asset,
-        bids: snapshot.bids,
-        asks: snapshot.asks,
-    });
+    scheduleDepthUpdate(order.asset);
 
     return result;
 }

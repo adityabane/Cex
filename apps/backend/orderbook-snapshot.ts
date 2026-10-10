@@ -1,4 +1,4 @@
-import { PrismaClientExtends } from "@prisma/client/extension";
+
 import { prisma } from "../engine/db";
 
 export type OrderBookSnapshot = {
@@ -8,72 +8,57 @@ export type OrderBookSnapshot = {
     asks: [string, string][];
 };
 
+type PriceLevel = {
+    price: string;
+    quantity: string;
+};
+
 export async function getOrderBookSnapshot(
-    asset: string
+    asset: string,
 ): Promise<OrderBookSnapshot> {
-    const orders = await prisma.order.findMany({
-        where: {
-            asset,
-            status: {
-                in: ["OPEN", "PARTIALLY_FILLED"],
-            },
-            remainingQty: {
-                gt: 0,
-            },
-            price: {
-                not: null,
-            },
-        },
-        orderBy: [
-            {
-                price: "asc",
-            },
-            {
-                createdAt: "asc",
-            },
-        ],
-    });
+    const normalizedAsset = asset.trim().toUpperCase();
 
-    const bids = new Map<string, number>();
-    const asks = new Map<string, number>();
-
-    for (const order of orders) {
-        if (order.price === null) {
-            continue;
-        }
-
-        const price = order.price.toString();
-        const quantity = Number(order.remainingQty);
-
-        const book =
-            order.side === "BUY"
-                ? bids
-                : asks;
-
-        book.set(
-            price,
-            (book.get(price) ?? 0) + quantity
-        );
-    }
+    const [bids, asks] = await Promise.all([
+        prisma.$queryRaw<PriceLevel[]>`
+            SELECT
+                price::text AS price,
+                SUM("remainingQty")::text AS quantity
+            FROM "Order"
+            WHERE asset = ${normalizedAsset}
+              AND side = 'BUY'
+              AND status IN ('OPEN', 'PARTIALLY_FILLED')
+              AND "remainingQty" > 0
+              AND price IS NOT NULL
+            GROUP BY price
+            ORDER BY price DESC
+            LIMIT 20
+        `,
+        prisma.$queryRaw<PriceLevel[]>`
+            SELECT
+                price::text AS price,
+                SUM("remainingQty")::text AS quantity
+            FROM "Order"
+            WHERE asset = ${normalizedAsset}
+              AND side = 'SELL'
+              AND status IN ('OPEN', 'PARTIALLY_FILLED')
+              AND "remainingQty" > 0
+              AND price IS NOT NULL
+            GROUP BY price
+            ORDER BY price ASC
+            LIMIT 20
+        `,
+    ]);
 
     return {
         type: "DEPTH_SNAPSHOT",
-        asset,
-        bids: Array.from(bids.entries())
-            .sort(
-                (a, b) =>
-                    Number(b[0]) - Number(a[0])
-            ).map(([price,quantity])=>[
-                price,
-                quantity.toString(),
-            ]),
-        asks: Array.from(asks.entries())
-            .sort(
-                (a, b) =>
-                    Number(a[0]) - Number(b[0])
-            ).map(([price, quantity]) => [
-                price,
-                quantity.toString(),
-            ])
+        asset: normalizedAsset,
+        bids: bids.map(({ price, quantity }) => [
+            price,
+            quantity,
+        ]),
+        asks: asks.map(({ price, quantity }) => [
+            price,
+            quantity,
+        ]),
     };
 }
